@@ -1,0 +1,859 @@
+#!/usr/bin/env bash
+# devbox: the DevBox delivery harness CLI.
+#
+# Scaffolds projects with DevBox conventions, tracks spec-driven features through
+# their lifecycle, runs the project's verify gates, and drives the AFK build loop
+# (one fresh headless agent session per task, gated by verify + commit checks).
+#
+# Plain bash with no dependencies beyond git and coreutils. Works on bash 3.2+.
+
+set -euo pipefail
+# bash 5.2+: keep "&" literal in ${var//pattern/replacement} (template values may contain it).
+shopt -u patsub_replacement 2>/dev/null || true
+
+DEVBOX_VERSION="0.1.0"
+
+# ---------------------------------------------------------------------------
+# Locations
+# ---------------------------------------------------------------------------
+
+resolve_home() {
+  local src="${BASH_SOURCE[0]}" dir
+  while [ -L "$src" ]; do
+    dir="$(cd -P "$(dirname "$src")" && pwd)"
+    src="$(readlink "$src")"
+    case "$src" in /*) ;; *) src="$dir/$src" ;; esac
+  done
+  cd -P "$(dirname "$src")/.." && pwd
+}
+
+DEVBOX_HOME="${DEVBOX_HOME:-$(resolve_home)}"
+SHAPES_DIR="$DEVBOX_HOME/playbooks/shapes"
+STACKS="node python go rust jvm dotnet generic"
+DEFAULT_PROTECTED="main master trunk production prod release"
+DEFAULT_AGENT_CMD="claude -p --permission-mode auto --output-format json --max-turns 120"
+
+# ---------------------------------------------------------------------------
+# Output
+# ---------------------------------------------------------------------------
+
+if [ -t 1 ] && [ -z "${NO_COLOR:-}" ]; then
+  C_BOLD=$'\033[1m'; C_DIM=$'\033[2m'; C_RED=$'\033[31m'; C_GREEN=$'\033[32m'; C_YELLOW=$'\033[33m'; C_RESET=$'\033[0m'
+else
+  C_BOLD=""; C_DIM=""; C_RED=""; C_GREEN=""; C_YELLOW=""; C_RESET=""
+fi
+
+say()  { printf '%s\n' "$*"; }
+ok()   { printf '  %sok%s    %s\n' "$C_GREEN" "$C_RESET" "$*"; }
+miss() { printf '  %smiss%s  %s\n' "$C_YELLOW" "$C_RESET" "$*"; }
+warn() { printf '%swarning:%s %s\n' "$C_YELLOW" "$C_RESET" "$*" >&2; }
+die()  { printf '%serror:%s %s\n' "$C_RED" "$C_RESET" "$*" >&2; exit 1; }
+
+# ---------------------------------------------------------------------------
+# Small helpers
+# ---------------------------------------------------------------------------
+
+today() { date +%Y-%m-%d; }
+
+slugify() {
+  printf '%s' "$1" | tr '[:upper:]' '[:lower:]' \
+    | sed -E 's/[^a-z0-9]+/-/g; s/^-+//; s/-+$//' | cut -c1-48 | sed -E 's/-+$//'
+}
+
+# next_num DIR WIDTH -> next zero-padded number after the highest "NNN-" entry in DIR
+next_num() {
+  local dir="$1" width="$2" max=0 p base n
+  if [ -d "$dir" ]; then
+    for p in "$dir"/*; do
+      [ -e "$p" ] || continue
+      base="${p##*/}"
+      n="${base%%-*}"
+      case "$n" in '' | *[!0-9]*) continue ;; esac
+      n=$((10#$n))
+      [ "$n" -gt "$max" ] && max=$n
+    done
+  fi
+  printf "%0${width}d" $((max + 1))
+}
+
+# render SRC DEST KEY=VALUE... : copy a template, replacing {{KEY}} placeholders.
+render() {
+  local src="$1" dest="$2" content kv key val pat
+  shift 2
+  content="$(cat "$src"; printf x)"
+  content="${content%x}"
+  for kv in "$@"; do
+    key="${kv%%=*}"
+    val="${kv#*=}"
+    pat="{{$key}}"
+    content=${content//"$pat"/$val}
+  done
+  mkdir -p "$(dirname "$dest")"
+  printf '%s' "$content" >"$dest"
+}
+
+# cfg_get FILE KEY : read KEY=value from a config file without executing it.
+cfg_get() {
+  local file="$1" key="$2" line
+  [ -f "$file" ] || return 0
+  line="$(grep -E "^${key}=" "$file" | tail -n 1 || true)"
+  line="${line#*=}"
+  case "$line" in
+    \"*\") line="${line#\"}"; line="${line%\"}" ;;
+    \'*\') line="${line#\'}"; line="${line%\'}" ;;
+  esac
+  printf '%s' "$line"
+}
+
+# cfg_set FILE KEY VALUE : replace or append KEY=VALUE.
+cfg_set() {
+  local file="$1" key="$2" val="$3" tmp
+  tmp="$(mktemp)"
+  if grep -qE "^${key}=" "$file"; then
+    awk -v k="$key" -v v="$val" 'index($0, k"=") == 1 { print k"="v; next } { print }' "$file" >"$tmp"
+  else
+    cat "$file" >"$tmp"
+    printf '%s=%s\n' "$key" "$val" >>"$tmp"
+  fi
+  cat "$tmp" >"$file"
+  rm -f "$tmp"
+}
+
+# fm_get FILE KEY : read a key from the YAML front matter of a markdown file.
+fm_get() {
+  [ -f "$1" ] || return 0
+  awk -v k="$2" '
+    NR == 1 && $0 != "---" { exit }
+    NR > 1 && $0 == "---" { exit }
+    NR > 1 && index($0, k":") == 1 {
+      v = substr($0, length(k) + 2); sub(/#.*/, "", v)
+      gsub(/^[ \t]+|[ \t]+$/, "", v); print v; exit
+    }' "$1"
+}
+
+# fm_set FILE KEY VALUE : set a front matter key, keeping any trailing comment.
+fm_set() {
+  local file="$1" key="$2" val="$3" tmp
+  tmp="$(mktemp)"
+  awk -v k="$key" -v v="$val" '
+    NR == 1 && $0 == "---" { infm = 1; print; next }
+    infm && $0 == "---" { if (!done) print k": "v; infm = 0; print; next }
+    infm && index($0, k":") == 1 {
+      c = index($0, "#"); line = k": "v
+      if (c > 0) line = line "   " substr($0, c)
+      print line; done = 1; next
+    }
+    { print }' "$file" >"$tmp"
+  cat "$tmp" >"$file"
+  rm -f "$tmp"
+}
+
+# Find the project root: nearest ancestor of $PWD with .devbox/config.
+find_root() {
+  local d="$PWD"
+  while [ "$d" != "/" ] && [ -n "$d" ]; do
+    [ -f "$d/.devbox/config" ] && { printf '%s' "$d"; return 0; }
+    d="$(dirname "$d")"
+  done
+  return 1
+}
+
+require_project() {
+  find_root || die "not inside a DevBox project (no .devbox/config found). Run: devbox init"
+}
+
+# ---------------------------------------------------------------------------
+# Tasks and features
+# ---------------------------------------------------------------------------
+
+TASK_OPEN='^[[:space:]]*- \[ \] T[0-9]+'
+TASK_DONE='^[[:space:]]*- \[[xX]\] T[0-9]+'
+TASK_BLOCKED='^[[:space:]]*- \[!\] T[0-9]+'
+
+count_lines() { [ -f "$2" ] || { echo 0; return; }; grep -cE "$1" "$2" || true; }
+next_task_line() { [ -f "$1" ] || return 0; grep -m 1 -E "$TASK_OPEN" "$1" | sed -E 's/^[[:space:]]+//' || true; }
+task_id_of() { printf '%s' "$1" | sed -E 's/^[[:space:]]*- \[.\] (T[0-9]+).*/\1/'; }
+
+task_state() {
+  local file="$1" id="$2"
+  if grep -qE "^[[:space:]]*- \[[xX]\] ${id}([^0-9]|$)" "$file"; then echo "done"
+  elif grep -qE "^[[:space:]]*- \[!\] ${id}([^0-9]|$)" "$file"; then echo blocked
+  elif grep -qE "^[[:space:]]*- \[ \] ${id}([^0-9]|$)" "$file"; then echo open
+  else echo missing
+  fi
+}
+
+# feature_phase DIR : the lifecycle phase a feature is in, derived from its files.
+feature_phase() {
+  local dir="$1" spec design tasks total open blocked
+  spec="$(fm_get "$dir/spec.md" status)"
+  design="$(fm_get "$dir/design.md" status)"
+  tasks="$(fm_get "$dir/tasks.md" status)"
+  open="$(count_lines "$TASK_OPEN" "$dir/tasks.md")"
+  blocked="$(count_lines "$TASK_BLOCKED" "$dir/tasks.md")"
+  total=$((open + blocked + $(count_lines "$TASK_DONE" "$dir/tasks.md")))
+  if [ "$spec" = "shipped" ]; then echo "done"
+  elif [ "$spec" != "approved" ]; then
+    if grep -q '\[NEEDS CLARIFICATION:' "$dir/spec.md" 2>/dev/null; then echo clarify; else echo specify; fi
+  elif [ -f "$dir/design.md" ] && [ "$design" != "approved" ]; then echo design
+  elif [ "$total" -eq 0 ]; then echo plan
+  elif [ "$tasks" != "approved" ]; then echo critique
+  elif [ "$open" -gt 0 ]; then echo build
+  elif [ "$blocked" -gt 0 ]; then echo blocked
+  else echo verify-ship
+  fi
+}
+
+list_features() {
+  local root="$1" d
+  [ -d "$root/specs" ] || return 0
+  for d in "$root"/specs/[0-9]*-*/; do
+    [ -d "$d" ] && printf '%s\n' "${d%/}"
+  done
+}
+
+current_feature() {
+  local root="$1" cur d
+  if [ -f "$root/.devbox/current" ]; then
+    cur="$(head -n 1 "$root/.devbox/current")"
+    [ -n "$cur" ] && [ -d "$root/$cur" ] && { printf '%s' "$root/$cur"; return 0; }
+  fi
+  # Fall back to the newest feature that has not shipped.
+  cur=""
+  for d in $(list_features "$root"); do
+    [ "$(fm_get "$d/spec.md" status)" = "shipped" ] || cur="$d"
+  done
+  [ -n "$cur" ] && printf '%s' "$cur"
+}
+
+# resolve_feature ROOT [ARG] : ARG may be empty (current), a number, a path, or a name fragment.
+resolve_feature() {
+  local root="$1" arg="${2:-}" d n
+  if [ -z "$arg" ]; then
+    d="$(current_feature "$root")"
+    [ -n "$d" ] || die "no active feature. Create one: devbox feature \"<name>\""
+    printf '%s' "$d"; return
+  fi
+  if [ -d "$arg" ] && [ -f "$arg/spec.md" ]; then (cd "$arg" && pwd); return; fi
+  if [ -d "$root/$arg" ]; then printf '%s' "$root/$arg"; return; fi
+  case "$arg" in
+    *[!0-9]*) ;;
+    *) n="$(printf '%03d' $((10#$arg)))"
+       for d in "$root"/specs/"$n"-*/; do [ -d "$d" ] && { printf '%s' "${d%/}"; return; }; done ;;
+  esac
+  for d in "$root"/specs/*"$arg"*/; do [ -d "$d" ] && { printf '%s' "${d%/}"; return; }; done
+  die "no feature matches '$arg'"
+}
+
+rel() { local root="$1" p="$2"; printf '%s' "${p#"$root"/}"; }
+
+# ---------------------------------------------------------------------------
+# Stack detection and defaults
+# ---------------------------------------------------------------------------
+
+detect_stack() {
+  local d="$1"
+  if [ -f "$d/package.json" ]; then echo node
+  elif [ -f "$d/pyproject.toml" ] || [ -f "$d/requirements.txt" ] || [ -f "$d/setup.py" ]; then echo python
+  elif [ -f "$d/go.mod" ]; then echo go
+  elif [ -f "$d/Cargo.toml" ]; then echo rust
+  elif [ -f "$d/build.gradle" ] || [ -f "$d/build.gradle.kts" ] || [ -f "$d/pom.xml" ]; then echo jvm
+  elif ls "$d"/*.sln "$d"/*.csproj >/dev/null 2>&1; then echo dotnet
+  else echo generic
+  fi
+}
+
+node_runner() {
+  local d="$1"
+  if [ -f "$d/pnpm-lock.yaml" ]; then echo pnpm
+  elif [ -f "$d/yarn.lock" ]; then echo yarn
+  else echo npm
+  fi
+}
+
+# stack_cmd STACK GATE DIR -> default command for a verify gate (may be empty).
+# Commands are stored as text and run later with `bash -c`, so single quotes are intended.
+# shellcheck disable=SC2016
+stack_cmd() {
+  local stack="$1" gate="$2" dir="$3" pm
+  case "$stack:$gate" in
+    node:*) pm="$(node_runner "$dir")"
+      case "$gate" in
+        FORMAT) echo "$pm run --if-present format:check" ;;
+        LINT) echo "$pm run --if-present lint" ;;
+        TYPECHECK) echo "$pm run --if-present typecheck" ;;
+        TEST) echo "$pm test" ;;
+        BUILD) echo "$pm run --if-present build" ;;
+      esac ;;
+    python:FORMAT) echo "uv run ruff format --check ." ;;
+    python:LINT) echo "uv run ruff check ." ;;
+    python:TYPECHECK) echo "uv run pyright" ;;
+    python:TEST) echo "uv run pytest" ;;
+    go:FORMAT) echo 'test -z "$(gofmt -l .)"' ;;
+    go:LINT) echo "go vet ./..." ;;
+    go:TEST) echo "go test -race ./..." ;;
+    go:BUILD) echo "go build ./..." ;;
+    rust:FORMAT) echo "cargo fmt --all --check" ;;
+    rust:LINT) echo "cargo clippy --all-targets --all-features -- -D warnings" ;;
+    rust:TEST) echo "cargo test --all-features" ;;
+    rust:BUILD) echo "cargo build --all-features" ;;
+    jvm:TEST) if [ -f "$dir/pom.xml" ]; then echo "mvn -B verify"; else echo "./gradlew check"; fi ;;
+    jvm:BUILD) if [ -f "$dir/pom.xml" ]; then echo "mvn -B -DskipTests package"; else echo "./gradlew build -x test"; fi ;;
+    dotnet:FORMAT) echo "dotnet format --verify-no-changes" ;;
+    dotnet:TEST) echo "dotnet test" ;;
+    dotnet:BUILD) echo "dotnet build -warnaserror" ;;
+    *) echo "" ;;
+  esac
+}
+
+dependabot_ecosystem() {
+  case "$1" in
+    node) echo npm ;; python) echo uv ;; go) echo gomod ;; rust) echo cargo ;;
+    jvm) echo gradle ;; dotnet) echo nuget ;; *) echo "" ;;
+  esac
+}
+
+valid_shape() { [ -f "$SHAPES_DIR/$1.md" ]; }
+
+# ---------------------------------------------------------------------------
+# Commands
+# ---------------------------------------------------------------------------
+
+usage() {
+  cat <<EOF
+${C_BOLD}devbox${C_RESET} ${DEVBOX_VERSION}: spec-driven delivery harness
+
+Usage: devbox <command> [args]
+
+Project setup
+  init [DIR] [--shape S[,S]] [--stack K] [--name N] [--force]
+                          Install DevBox into a project (AGENTS.md, CLAUDE.md,
+                          .devbox/, docs/adr, .github templates, CI workflow)
+  sync                    Refresh vendored playbooks and templates in .devbox/
+  doctor                  Check tools and project conformance
+  shapes                  List project shapes with playbooks
+
+Feature lifecycle
+  feature NAME            Start a feature: specs/NNN-name/{spec,design,tasks,progress}.md
+  status [--brief]        Show every feature, its phase and task progress
+  next [FEATURE]          Print the next open task
+  approve GATE [FEATURE]  Pass a gate: spec | design | tasks | ship
+  use FEATURE             Set the active feature
+  adr TITLE               Record an architecture decision in docs/adr/
+
+Build and verify
+  verify                  Run the verify gates from .devbox/config
+  run [FEATURE] [--max N] [--dry-run] [--allow-dirty]
+                          AFK loop: one headless agent session per open task,
+                          stopping on HITL tasks, blocks, failed gates or limits
+
+Shapes: $(for f in "$SHAPES_DIR"/*.md; do [ -f "$f" ] && printf '%s ' "$(basename "$f" .md)"; done)
+Stacks: $STACKS
+EOF
+}
+
+cmd_shapes() {
+  local f name desc
+  for f in "$SHAPES_DIR"/*.md; do
+    name="$(basename "$f" .md)"
+    desc="$(grep -m 1 -E '^> ' "$f" | sed -E 's/^> //' || true)"
+    printf '  %-16s %s\n' "$name" "$desc"
+  done
+}
+
+copy_vendored() {
+  # copy_vendored ROOT SHAPES FORCE
+  local root="$1" shapes="$2" force="$3" f s dest
+  mkdir -p "$root/.devbox/playbooks/shapes" "$root/.devbox/templates"
+  for f in "$DEVBOX_HOME"/playbooks/*.md; do
+    dest="$root/.devbox/playbooks/$(basename "$f")"
+    { [ "$force" = 1 ] || [ ! -f "$dest" ]; } && cp "$f" "$dest"
+  done
+  for s in $(printf '%s' "$shapes" | tr ',' ' '); do
+    dest="$root/.devbox/playbooks/shapes/$s.md"
+    { [ "$force" = 1 ] || [ ! -f "$dest" ]; } && cp "$SHAPES_DIR/$s.md" "$dest"
+  done
+  for f in "$DEVBOX_HOME"/templates/docs/*.md "$DEVBOX_HOME"/templates/spec/*.md; do
+    dest="$root/.devbox/templates/$(basename "$f")"
+    { [ "$force" = 1 ] || [ ! -f "$dest" ]; } && cp "$f" "$dest"
+  done
+  # A pinned copy of this CLI, so CI and agents without DevBox installed can run `.devbox/bin/devbox verify`.
+  mkdir -p "$root/.devbox/bin"
+  cp "$DEVBOX_HOME/bin/devbox" "$root/.devbox/bin/devbox"
+  chmod +x "$root/.devbox/bin/devbox"
+  return 0
+}
+
+require_full_install() {
+  [ -d "$DEVBOX_HOME/templates/project" ] \
+    || die "this is the vendored copy of devbox in .devbox/bin. Run '$1' from a full DevBox install (see the DevBox README)."
+}
+
+ensure_gitignore() {
+  local file="$1/.gitignore" line
+  touch "$file"
+  for line in ".devbox/runs/" ".devbox/current" ".devbox/STOP" ".claude/worktrees/" ".claude/settings.local.json"; do
+    grep -qxF "$line" "$file" || {
+      grep -qxF "# DevBox" "$file" || printf '\n# DevBox\n' >>"$file"
+      printf '%s\n' "$line" >>"$file"
+    }
+  done
+}
+
+cmd_init() {
+  require_full_install init
+  local dir="." shape="" stack="" name="" force=0
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --shape) shape="${2:-}"; shift 2 ;;
+      --shape=*) shape="${1#*=}"; shift ;;
+      --stack) stack="${2:-}"; shift 2 ;;
+      --stack=*) stack="${1#*=}"; shift ;;
+      --name) name="${2:-}"; shift 2 ;;
+      --name=*) name="${1#*=}"; shift ;;
+      --force) force=1; shift ;;
+      -h | --help) usage; return 0 ;;
+      -*) die "unknown option: $1" ;;
+      *) dir="$1"; shift ;;
+    esac
+  done
+  mkdir -p "$dir"
+  dir="$(cd "$dir" && pwd)"
+  [ -n "$name" ] || name="$(basename "$dir")"
+  [ -n "$stack" ] || stack="$(detect_stack "$dir")"
+  case " $STACKS " in *" $stack "*) ;; *) die "unknown stack '$stack' (choose: $STACKS)" ;; esac
+  [ -n "$shape" ] || shape="$(cfg_get "$dir/.devbox/config" DEVBOX_SHAPE)"
+  [ -n "$shape" ] || die "choose a project shape with --shape (see: devbox shapes)"
+  local s
+  for s in $(printf '%s' "$shape" | tr ',' ' '); do
+    valid_shape "$s" || die "unknown shape '$s' (see: devbox shapes)"
+  done
+
+  local fmt lint tc test build eco dependabot_extra=""
+  fmt="$(stack_cmd "$stack" FORMAT "$dir")"
+  lint="$(stack_cmd "$stack" LINT "$dir")"
+  tc="$(stack_cmd "$stack" TYPECHECK "$dir")"
+  test="$(stack_cmd "$stack" TEST "$dir")"
+  build="$(stack_cmd "$stack" BUILD "$dir")"
+  eco="$(dependabot_ecosystem "$stack")"
+  if [ -n "$eco" ]; then
+    dependabot_extra="  - package-ecosystem: \"$eco\"
+    directory: \"/\"
+    schedule:
+      interval: \"weekly\"
+    groups:
+      minor-and-patch:
+        update-types: [\"minor\", \"patch\"]"
+  fi
+  local verify_lines="" g c
+  for g in FORMAT LINT TYPECHECK TEST BUILD; do
+    c="$(stack_cmd "$stack" "$g" "$dir")"
+    [ -n "$c" ] && verify_lines="${verify_lines}- \`${c}\`
+"
+  done
+  [ -n "$verify_lines" ] || verify_lines="- (not configured yet: set the DEVBOX_*_CMD lines in \`.devbox/config\`)
+"
+  verify_lines="${verify_lines%
+}"
+
+  local vars=(
+    "PROJECT_NAME=$name" "SHAPE=$shape" "STACK=$stack" "DATE=$(today)" "DEVBOX_VERSION=$DEVBOX_VERSION"
+    "FORMAT_CMD=$fmt" "LINT_CMD=$lint" "TYPECHECK_CMD=$tc" "TEST_CMD=$test" "BUILD_CMD=$build"
+    "VERIFY_LINES=$verify_lines" "DEPENDABOT_EXTRA=$dependabot_extra"
+  )
+
+  local src rel_path dest created=0 skipped=0
+  while IFS= read -r src; do
+    rel_path="${src#"$DEVBOX_HOME/templates/project/"}"
+    rel_path="${rel_path%.tmpl}"
+    dest="$dir/$rel_path"
+    if [ -e "$dest" ] && [ "$force" != 1 ]; then
+      skipped=$((skipped + 1)); say "  ${C_DIM}keep${C_RESET}  $rel_path"
+      continue
+    fi
+    render "$src" "$dest" "${vars[@]}"
+    created=$((created + 1)); say "  ${C_GREEN}add${C_RESET}   $rel_path"
+  done < <(find "$DEVBOX_HOME/templates/project" -type f | LC_ALL=C sort)
+
+  dest="$dir/.github/workflows/ci.yml"
+  if [ ! -e "$dest" ] || [ "$force" = 1 ]; then
+    render "$DEVBOX_HOME/templates/ci/$stack.yml" "$dest" "${vars[@]}"
+    created=$((created + 1)); say "  ${C_GREEN}add${C_RESET}   .github/workflows/ci.yml ($stack)"
+  else
+    skipped=$((skipped + 1)); say "  ${C_DIM}keep${C_RESET}  .github/workflows/ci.yml"
+  fi
+
+  copy_vendored "$dir" "$shape" "$force"
+  ensure_gitignore "$dir"
+  say ""
+  say "${C_BOLD}DevBox installed${C_RESET} in $dir ($created added, $skipped kept). shape=$shape stack=$stack"
+  say "Next:"
+  say "  1. Fill in the Project section of AGENTS.md and review .devbox/constitution.md"
+  say "  2. Check the verify gates in .devbox/config, then run: devbox verify"
+  say "  3. Start work: devbox feature \"<name>\"  (or /devbox:deliver in Claude Code)"
+}
+
+cmd_sync() {
+  require_full_install sync
+  local root shape
+  root="$(require_project)"
+  shape="$(cfg_get "$root/.devbox/config" DEVBOX_SHAPE)"
+  copy_vendored "$root" "$shape" 1
+  cfg_set "$root/.devbox/config" DEVBOX_VERSION "$DEVBOX_VERSION"
+  say "Synced playbooks and templates from DevBox $DEVBOX_VERSION into .devbox/"
+}
+
+cmd_feature() {
+  [ -n "${1:-}" ] || die "usage: devbox feature NAME"
+  local root title slug num dir tpl f
+  root="$(require_project)"
+  title="$*"
+  slug="$(slugify "$title")"
+  [ -n "$slug" ] || die "feature name must contain letters or digits"
+  num="$(next_num "$root/specs" 3)"
+  dir="$root/specs/$num-$slug"
+  mkdir -p "$dir"
+  for f in spec design tasks progress; do
+    tpl="$root/.devbox/templates/$f.md"
+    [ -f "$tpl" ] || tpl="$DEVBOX_HOME/templates/spec/$f.md"
+    render "$tpl" "$dir/$f.md" "FEATURE_ID=$num-$slug" "FEATURE_TITLE=$title" "DATE=$(today)"
+  done
+  printf '%s\n' "specs/$num-$slug" >"$root/.devbox/current"
+  say "Created specs/$num-$slug/ (spec.md, design.md, tasks.md, progress.md) and made it the active feature."
+  say "Next: write the spec (/devbox:spec), then grill it (/devbox:grill)."
+}
+
+cmd_use() {
+  local root dir
+  root="$(require_project)"
+  dir="$(resolve_feature "$root" "${1:-}")"
+  rel "$root" "$dir" >"$root/.devbox/current"
+  printf '\n' >>"$root/.devbox/current"
+  say "Active feature: $(rel "$root" "$dir")"
+}
+
+cmd_adr() {
+  [ -n "${1:-}" ] || die "usage: devbox adr TITLE"
+  local root base title num slug tpl dest
+  root="$(find_root || git rev-parse --show-toplevel 2>/dev/null || pwd)"
+  title="$*"
+  slug="$(slugify "$title")"
+  num="$(next_num "$root/docs/adr" 4)"
+  tpl="$root/.devbox/templates/adr.md"
+  [ -f "$tpl" ] || tpl="$DEVBOX_HOME/templates/docs/adr.md"
+  dest="$root/docs/adr/$num-$slug.md"
+  render "$tpl" "$dest" "NUMBER=$num" "TITLE=$title" "DATE=$(today)"
+  base="docs/adr/$num-$slug.md"
+  say "$base"
+}
+
+cmd_status() {
+  local brief=0 root cfg cur d phase open ndone blocked total next marker
+  [ "${1:-}" = "--brief" ] && brief=1
+  root="$(require_project)"
+  cfg="$root/.devbox/config"
+  cur="$(current_feature "$root" || true)"
+  if [ "$brief" = 1 ]; then
+    say "DevBox project: $(cfg_get "$cfg" DEVBOX_PROJECT) (shape: $(cfg_get "$cfg" DEVBOX_SHAPE), stack: $(cfg_get "$cfg" DEVBOX_STACK))"
+    if [ -n "$cur" ]; then
+      phase="$(feature_phase "$cur")"
+      next="$(next_task_line "$cur/tasks.md")"
+      say "Active feature: $(rel "$root" "$cur") | phase: $phase${next:+ | next: $next}"
+    else
+      say "No active feature. Start one with /devbox:deliver or: devbox feature \"<name>\""
+    fi
+    return 0
+  fi
+  say "${C_BOLD}$(cfg_get "$cfg" DEVBOX_PROJECT)${C_RESET}  shape=$(cfg_get "$cfg" DEVBOX_SHAPE) stack=$(cfg_get "$cfg" DEVBOX_STACK) devbox=$(cfg_get "$cfg" DEVBOX_VERSION)"
+  local any=0
+  for d in $(list_features "$root"); do
+    any=1
+    phase="$(feature_phase "$d")"
+    open="$(count_lines "$TASK_OPEN" "$d/tasks.md")"
+    ndone="$(count_lines "$TASK_DONE" "$d/tasks.md")"
+    blocked="$(count_lines "$TASK_BLOCKED" "$d/tasks.md")"
+    total=$((open + ndone + blocked))
+    marker=" "; [ "$d" = "$cur" ] && marker="*"
+    printf ' %s %-36s %-12s %s/%s tasks' "$marker" "$(basename "$d")" "$phase" "$ndone" "$total"
+    [ "$blocked" -gt 0 ] && printf ' (%s blocked)' "$blocked"
+    printf '\n'
+  done
+  [ "$any" = 1 ] || say "  no features yet: devbox feature \"<name>\""
+  if [ -n "$cur" ]; then
+    next="$(next_task_line "$cur/tasks.md")"
+    [ -n "$next" ] && say "next: $next"
+  fi
+  return 0
+}
+
+cmd_next() {
+  local root dir line
+  root="$(require_project)"
+  dir="$(resolve_feature "$root" "${1:-}")"
+  line="$(next_task_line "$dir/tasks.md")"
+  if [ -n "$line" ]; then say "$line"; else say "no open tasks in $(rel "$root" "$dir") (phase: $(feature_phase "$dir"))"; fi
+}
+
+cmd_approve() {
+  local gate="${1:-}" root dir open
+  [ -n "$gate" ] || die "usage: devbox approve spec|design|tasks|ship [FEATURE]"
+  root="$(require_project)"
+  dir="$(resolve_feature "$root" "${2:-}")"
+  case "$gate" in
+    spec)
+      if grep -n '\[NEEDS CLARIFICATION:' "$dir/spec.md" >&2; then
+        die "spec still has open NEEDS CLARIFICATION markers (above). Resolve them first (/devbox:grill)."
+      fi
+      fm_set "$dir/spec.md" status approved ;;
+    design)
+      [ -f "$dir/design.md" ] || die "no design.md in $(rel "$root" "$dir")"
+      fm_set "$dir/design.md" status approved ;;
+    tasks)
+      [ $(( $(count_lines "$TASK_OPEN" "$dir/tasks.md") + $(count_lines "$TASK_DONE" "$dir/tasks.md") + $(count_lines "$TASK_BLOCKED" "$dir/tasks.md") )) -gt 0 ] \
+        || die "tasks.md has no tasks yet (/devbox:slice)"
+      fm_set "$dir/tasks.md" status approved ;;
+    ship)
+      open="$(count_lines "$TASK_OPEN" "$dir/tasks.md")"
+      [ "$open" -eq 0 ] || die "$open open task(s) remain"
+      fm_set "$dir/spec.md" status shipped ;;
+    *) die "unknown gate '$gate' (spec|design|tasks|ship)" ;;
+  esac
+  say "Approved $gate for $(rel "$root" "$dir"). Phase is now: $(feature_phase "$dir")"
+}
+
+cmd_verify() {
+  local root cfg gate cmd out failed=0 ran=0
+  root="$(require_project)"
+  cfg="$root/.devbox/config"
+  out="$(mktemp)"
+  for gate in FORMAT LINT TYPECHECK TEST BUILD; do
+    cmd="$(cfg_get "$cfg" "DEVBOX_${gate}_CMD")"
+    [ -n "$cmd" ] || continue
+    ran=$((ran + 1))
+    printf '  %-10s %s ... ' "$gate" "$cmd"
+    if (cd "$root" && bash -c "$cmd") >"$out" 2>&1; then
+      printf '%spass%s\n' "$C_GREEN" "$C_RESET"
+    else
+      printf '%sFAIL%s\n' "$C_RED" "$C_RESET"
+      tail -n 40 "$out" | sed 's/^/      /'
+      failed=$((failed + 1))
+    fi
+  done
+  rm -f "$out"
+  if [ "$ran" -eq 0 ]; then
+    warn "no verify gates configured. Set DEVBOX_*_CMD in .devbox/config."
+    return 0
+  fi
+  if [ "$failed" -gt 0 ]; then
+    say "verify: $failed of $ran gate(s) failed"
+    return 3
+  fi
+  say "verify: all $ran gate(s) passed"
+}
+
+cmd_doctor() {
+  local root cfg t g n=0
+  say "${C_BOLD}Tools${C_RESET}"
+  for t in git claude gh jq; do
+    if command -v "$t" >/dev/null 2>&1; then ok "$t"; else
+      case "$t" in
+        git) miss "git (required)"; n=$((n + 1)) ;;
+        claude) miss "claude (needed for devbox run and the plugin)" ;;
+        gh) miss "gh (needed to open PRs and file issues)" ;;
+        jq) miss "jq (hooks fall back to python3)" ;;
+      esac
+    fi
+  done
+  if ! root="$(find_root)"; then
+    say ""; say "Not inside a DevBox project. Run: devbox init --shape <shape>"
+    return "$n"
+  fi
+  cfg="$root/.devbox/config"
+  say "${C_BOLD}Project${C_RESET} $root"
+  for t in AGENTS.md CLAUDE.md .devbox/constitution.md .devbox/bin/devbox .devbox/playbooks/lifecycle.md docs/adr .github/workflows .github/pull_request_template.md; do
+    if [ -e "$root/$t" ]; then ok "$t"; else miss "$t"; n=$((n + 1)); fi
+  done
+  if grep -q '{{' "$root/AGENTS.md" 2>/dev/null; then miss "AGENTS.md has unfilled {{placeholders}}"; n=$((n + 1)); fi
+  if grep -q 'TODO(devbox)' "$root/AGENTS.md" 2>/dev/null; then miss "AGENTS.md still has TODO(devbox) sections to fill in"; fi
+  for g in LINT TEST; do
+    if [ -n "$(cfg_get "$cfg" "DEVBOX_${g}_CMD")" ]; then ok "verify gate $g configured"; else miss "verify gate $g (set DEVBOX_${g}_CMD)"; n=$((n + 1)); fi
+  done
+  if git -C "$root" rev-parse --is-inside-work-tree >/dev/null 2>&1; then ok "git repository"; else miss "git repository (git init)"; n=$((n + 1)); fi
+  if [ "$(cfg_get "$cfg" DEVBOX_VERSION)" != "$DEVBOX_VERSION" ]; then
+    miss "project uses DevBox $(cfg_get "$cfg" DEVBOX_VERSION), CLI is $DEVBOX_VERSION (devbox sync)"
+  fi
+  say ""
+  if [ "$n" -eq 0 ]; then say "doctor: healthy"; else say "doctor: $n issue(s)"; fi
+  return 0
+}
+
+# quota_hit JSON ERR : true when an agent run ended on a usage or rate limit.
+quota_hit() {
+  grep -Eqi "hit your (session|weekly|daily|usage) limit|usage limit|rate_limit_error|overloaded_error|credit balance is too low|request rejected \\(429\\)|\"api_error_status\": ?(429|529)" "$1" "$2" 2>/dev/null
+}
+
+agent_reported_error() {
+  local json="$1"
+  if command -v jq >/dev/null 2>&1 && jq -e . "$json" >/dev/null 2>&1; then
+    [ "$(jq -r 'if type == "array" then (map(select(.type? == "result")) | last | .is_error) else .is_error end // false' "$json")" = "true" ]
+  else
+    grep -q '"is_error": *true' "$json" 2>/dev/null
+  fi
+}
+
+cmd_run() {
+  local feature="" max=10 dry=0 allow_dirty=0
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --max) max="${2:-}"; shift 2 ;;
+      --max=*) max="${1#*=}"; shift ;;
+      --dry-run) dry=1; shift ;;
+      --allow-dirty) allow_dirty=1; shift ;;
+      -*) die "unknown option: $1" ;;
+      *) feature="$1"; shift ;;
+    esac
+  done
+  case "$max" in '' | *[!0-9]*) die "--max needs a number" ;; esac
+
+  local root cfg dir tasks_file feature_rel status branch protected p agent_cmd tpl
+  root="$(require_project)"
+  cfg="$root/.devbox/config"
+  dir="$(resolve_feature "$root" "$feature")"
+  feature_rel="$(rel "$root" "$dir")"
+  tasks_file="$dir/tasks.md"
+  [ -f "$tasks_file" ] || die "$feature_rel/tasks.md not found"
+  status="$(fm_get "$tasks_file" status)"
+  [ "$status" = "approved" ] || die "tasks.md is '$status', not approved. Pass the critique gate first (Linus GO), then: devbox approve tasks"
+
+  git -C "$root" rev-parse --is-inside-work-tree >/dev/null 2>&1 || die "devbox run needs a git repository"
+  branch="$(git -C "$root" rev-parse --abbrev-ref HEAD)"
+  protected="$(cfg_get "$cfg" DEVBOX_PROTECTED_BRANCHES)"
+  [ -n "$protected" ] || protected="$DEFAULT_PROTECTED"
+  for p in $protected; do
+    [ "$branch" = "$p" ] && die "refusing to run on protected branch '$branch'. Create a work branch first: git switch -c feat/$(basename "$dir" | sed -E 's/^[0-9]+-//')"
+  done
+  if [ "$allow_dirty" != 1 ] && [ -n "$(git -C "$root" status --porcelain)" ]; then
+    die "working tree is dirty. Commit or stash first (or pass --allow-dirty)"
+  fi
+
+  agent_cmd="$(cfg_get "$cfg" DEVBOX_AGENT_CMD)"
+  [ -n "$agent_cmd" ] || agent_cmd="$DEFAULT_AGENT_CMD"
+  tpl="$root/.devbox/templates/worker-prompt.md"
+  [ -f "$tpl" ] || tpl="$DEVBOX_HOME/templates/spec/worker-prompt.md"
+
+  local logs i=0 line id prompt head_before head_after stamp json err rc state verify_rc
+  logs="$root/.devbox/runs"
+  mkdir -p "$logs"
+
+  while [ "$i" -lt "$max" ]; do
+    if [ -f "$root/.devbox/STOP" ]; then
+      say "Found .devbox/STOP. Halting before the next task (delete the file to resume)."
+      return 0
+    fi
+    line="$(next_task_line "$tasks_file")"
+    if [ -z "$line" ]; then
+      if [ "$(count_lines "$TASK_BLOCKED" "$tasks_file")" -gt 0 ]; then
+        say "No open tasks, but some are blocked [!]. A human needs to unblock them."
+        return 2
+      fi
+      say "All tasks in $feature_rel are complete. Next phase: verify and ship (/devbox:verify, /devbox:ship)."
+      return 0
+    fi
+    id="$(task_id_of "$line")"
+    case "$line" in
+      *"[HITL]"*) say "Next task needs a human (HITL), stopping: $line"; return 2 ;;
+    esac
+
+    prompt="$(mktemp)"
+    render "$tpl" "$prompt" "TASK_ID=$id" "TASK_LINE=$line" "FEATURE_DIR=$feature_rel" "BRANCH=$branch"
+    if [ "$dry" = 1 ]; then
+      say "${C_BOLD}Would run${C_RESET} (cwd $root): $agent_cmd"
+      say "${C_BOLD}With prompt on stdin:${C_RESET}"
+      cat "$prompt"
+      rm -f "$prompt"
+      return 0
+    fi
+
+    stamp="$(date +%Y%m%d-%H%M%S)-$id"
+    json="$logs/$stamp.out"
+    err="$logs/$stamp.err"
+    head_before="$(git -C "$root" rev-parse HEAD 2>/dev/null || echo none)"
+    say "[$((i + 1))/$max] $id: $(printf '%s' "$line" | cut -c1-90)"
+    say "      log: .devbox/runs/$stamp.out"
+
+    set +e
+    (cd "$root" && DEVBOX_TASK_ID="$id" DEVBOX_FEATURE_DIR="$feature_rel" bash -c "$agent_cmd" <"$prompt" >"$json" 2>"$err")
+    rc=$?
+    set -e
+    rm -f "$prompt"
+
+    if [ "$rc" -ne 0 ] || agent_reported_error "$json"; then
+      if quota_hit "$json" "$err"; then
+        say "Usage or rate limit reached. Paused; re-run devbox run later to continue. (DevBox never enables paid overage.)"
+        return 4
+      fi
+      say "Agent session for $id failed (exit $rc). See .devbox/runs/$stamp.out and .err"
+      return 1
+    fi
+
+    state="$(task_state "$tasks_file" "$id")"
+    case "$state" in
+      blocked) say "$id was marked blocked [!] by the agent. See $feature_rel/progress.md."; return 2 ;;
+      done) ;;
+      *) say "Agent finished but $id is still '$state' in tasks.md. Inspect the log and progress.md."; return 1 ;;
+    esac
+
+    head_after="$(git -C "$root" rev-parse HEAD 2>/dev/null || echo none)"
+    if [ "$head_before" = "$head_after" ]; then
+      say "Agent marked $id done but made no commit. Stopping so a human can look."
+      return 1
+    fi
+
+    set +e
+    (cd "$root" && cmd_verify)
+    verify_rc=$?
+    set -e
+    if [ "$verify_rc" -ne 0 ]; then
+      say "Verify gates failed after $id. Stopping. Fix forward, then re-run."
+      return 3
+    fi
+    if [ -n "$(git -C "$root" status --porcelain)" ]; then
+      warn "working tree not clean after $id (uncommitted changes left by the agent)"
+    fi
+    i=$((i + 1))
+  done
+  if [ -z "$(next_task_line "$tasks_file")" ] && [ "$(count_lines "$TASK_BLOCKED" "$tasks_file")" -eq 0 ]; then
+    say "All tasks in $feature_rel are complete. Next phase: verify and ship (/devbox:verify, /devbox:ship)."
+  else
+    say "Reached --max $max task(s). Re-run devbox run to continue."
+  fi
+}
+
+# ---------------------------------------------------------------------------
+# Main
+# ---------------------------------------------------------------------------
+
+main() {
+  local cmd="${1:-help}"
+  [ $# -gt 0 ] && shift
+  case "$cmd" in
+    init) cmd_init "$@" ;;
+    sync) cmd_sync "$@" ;;
+    doctor) cmd_doctor "$@" ;;
+    shapes) cmd_shapes "$@" ;;
+    feature | new) cmd_feature "$@" ;;
+    use) cmd_use "$@" ;;
+    status | st) cmd_status "$@" ;;
+    next) cmd_next "$@" ;;
+    approve) cmd_approve "$@" ;;
+    adr) cmd_adr "$@" ;;
+    verify) cmd_verify "$@" ;;
+    run) cmd_run "$@" ;;
+    home) say "$DEVBOX_HOME" ;;
+    version | --version | -v) say "devbox $DEVBOX_VERSION" ;;
+    help | --help | -h) usage ;;
+    *) usage >&2; die "unknown command: $cmd" ;;
+  esac
+}
+
+main "$@"

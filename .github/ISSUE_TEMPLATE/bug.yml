@@ -1,0 +1,42 @@
+name: Bug report
+description: Something does not work as specified
+labels: ["bug"]
+body:
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: The smallest sequence that shows the bug. Include input data if you can.
+      placeholder: |
+        1. ...
+        2. ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: Error messages, logs, screenshots. Remove secrets and personal data.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version, commit or environment
+  - type: dropdown
+    id: severity
+    attributes:
+      label: Impact
+      options:
+        - Blocks users or loses data
+        - Degrades an important flow
+        - Annoying but has a workaround
+        - Cosmetic
+    validations:
+      required: true

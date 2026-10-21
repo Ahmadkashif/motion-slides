@@ -1,0 +1,45 @@
+name: Feature slice
+description: A thin, end-to-end slice of work with testable acceptance criteria
+labels: ["feature"]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What to build
+      description: The end-to-end behavior, not layer-by-layer steps. Reference the spec instead of copying it.
+      placeholder: "Parent spec: specs/NNN-name/spec.md (US1)"
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: Each one testable as written (EARS or Given/When/Then).
+      value: |
+        - [ ] WHEN ... THE SYSTEM SHALL ...
+        - [ ] Given ..., when ..., then ...
+    validations:
+      required: true
+  - type: textarea
+    id: verify
+    attributes:
+      label: Self-verification
+      description: Commands or checks that prove it is done (an agent will run these).
+      value: |
+        - [ ] devbox verify
+    validations:
+      required: true
+  - type: dropdown
+    id: mode
+    attributes:
+      label: Mode
+      options:
+        - AFK (an agent can finish it without a human)
+        - HITL (needs a human decision, credentials or review)
+    validations:
+      required: true
+  - type: input
+    id: blocked
+    attributes:
+      label: Blocked by
+      placeholder: "#123, #124 or none"

@@ -1,0 +1,26 @@
+# DevBox project configuration.
+# Plain KEY=value lines. Read by the `devbox` CLI, never executed as a whole file.
+# Commands below run with `bash -c` from the project root.
+
+DEVBOX_VERSION=0.1.0
+DEVBOX_PROJECT=motion-slides
+DEVBOX_SHAPE=cli
+DEVBOX_STACK=node
+
+# Verify gates, run in this order by `devbox verify`, by `devbox run` after every task, and by CI.
+# Leave a value empty to skip that gate. Every project should at least have LINT and TEST.
+DEVBOX_FORMAT_CMD=npm run --if-present format:check
+DEVBOX_LINT_CMD=npm run --if-present lint
+DEVBOX_TYPECHECK_CMD=npm run --if-present typecheck
+DEVBOX_TEST_CMD=npm test
+DEVBOX_BUILD_CMD=npm run --if-present build
+
+# AFK runner (`devbox run`). The prompt for each task is piped to this command on stdin.
+# Default: Claude Code headless in auto permission mode (a classifier blocks risky actions).
+# Stricter: claude -p --permission-mode acceptEdits --allowedTools "Bash(git *)" "Bash(npm *)" --output-format json --max-turns 120
+# Fully unattended only inside a disposable container or VM: add --dangerously-skip-permissions
+# Any other agent CLI works if it reads the prompt from stdin and exits non-zero on failure.
+DEVBOX_AGENT_CMD=claude -p --permission-mode auto --output-format json --max-turns 120
+
+# Branches `devbox run` refuses to work on directly.
+DEVBOX_PROTECTED_BRANCHES=main master trunk production prod release

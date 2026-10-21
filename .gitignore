@@ -1,0 +1,7 @@
+
+# DevBox
+.devbox/runs/
+.devbox/current
+.devbox/STOP
+.claude/worktrees/
+.claude/settings.local.json
