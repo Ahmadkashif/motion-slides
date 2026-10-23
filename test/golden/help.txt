@@ -1,0 +1,12 @@
+Usage: motion-slides [options]
+
+Make narrated, captioned explainer videos on this machine.
+
+Options:
+  -V, --version  output the version number
+  -h, --help     display help for command
+
+Exit codes:
+  0  success
+  1  failure
+  2  usage error (unknown option or command)

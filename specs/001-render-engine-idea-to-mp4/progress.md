@@ -41,3 +41,24 @@ Decisions: two 001 spec amendments (lead and gap at least 0.12 s; previews under
 build plan's delegation, flagged for the user at the PR. 008 approval covers Slice 1 (publish scan) only;
 the release slice is designed in Stage 8.
 Next: build 001 T001, then 008 T001, then the Stage 0 gate (001 T013).
+
+## 2026-10-23 22:34  build  T001
+
+Did: walking skeleton. package.json with the exact pins and no build script, both tsc projects, Biome, vitest,
+`.nvmrc`, `.gitignore`, the `motion-slides` bin (`--help`, `--version`, exit 0 and 2), CI on master with Ubuntu
+24.04, Node from `.nvmrc`, apt ffmpeg and strace and the headless shell; Dependabot ignores playwright-core;
+AGENTS.md Commands and Testing filled in.
+Evidence: `.devbox/bin/devbox verify`: FORMAT pass, LINT pass, TYPECHECK pass, TEST pass (1 file, 6 tests),
+BUILD pass (no build script, skipped by `--if-present`). Golden tests in `test/golden/cli.test.ts`: `--help`,
+`--version`, unknown option (exit 2), unknown command (exit 2), no command (help on stderr, exit 2), stdout
+closed early (exit 0, empty stderr). Each gate was also shown to fail on a planted fault (an unformatted file, a
+`==` comparison, unsorted imports, a type error in `main.ts`, a bad import in the bin, a wrong gsap type in a
+stage file), and the faults were removed. After `npm ci && npm test` no file changed; `git check-ignore
+node_modules/ build/ out/ | wc -l` prints 3. CI green is checked at ship.
+Decisions: no arguments prints help on stderr and exits 2. A stray word is reported as an unknown command
+(commander says "too many arguments" while there are no subcommands). EPIPE on stdout is ignored, so
+`--help | head -1` exits 0 without a stack trace. The lint gate is `biome check --formatter-enabled=false
+--error-on-warnings` (rules plus import order; warnings fail, per P7). Biome uses spaces, single quotes and
+100 columns. `tsconfig.json` also checks `bin/*.js`; `tsconfig.stage.json` takes `src/stage/types/gsap.d.ts`
+as its first input. Both projects use `skipLibCheck`. CI caches npm through setup-node.
+Next: 008 T001 (publish scan), then the Stage 0 gate (001 T013).

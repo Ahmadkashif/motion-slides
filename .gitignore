@@ -5,3 +5,15 @@
 .devbox/STOP
 .claude/worktrees/
 .claude/settings.local.json
+
+# Node
+node_modules/
+coverage/
+*.tsbuildinfo
+
+# Render output
+build/
+out/
+
+# Local environment files
+.env*
