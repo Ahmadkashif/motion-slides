@@ -77,7 +77,6 @@ class GitFailed extends CannotScan {
   constructor(command, status, stderr) {
     const detail = stderr.split('\n').find((line) => line.trim() !== '') ?? `exit ${status}`;
     super(`git ${command} failed: ${detail.trim()}`);
-    this.status = status;
   }
 }
 
@@ -232,39 +231,31 @@ async function scanRepository(ctx, repo, include, pushRefs, env) {
 }
 
 /**
- * A full scan only passes a clone whose pushes are scanned: core.hooksPath is the absolute
- * motion-slides-hooks folder in the git common dir, and its pre-push is executable and byte for byte the
- * committed .githooks/pre-push.
+ * A full scan only passes a clone whose pushes are scanned: git runs hooks from its default folder
+ * `<git common dir>/hooks` (no core.hooksPath, local or global, sends it elsewhere), and the pre-push
+ * there is executable and byte for byte the committed .githooks/pre-push.
  * @param {string} top
  * @param {(args: string[]) => Promise<Buffer>} run
  */
 async function checkHook(top, run) {
-  const common = (await run(['rev-parse', '--path-format=absolute', '--git-common-dir']))
-    .toString('utf8')
-    .trim();
-  const folder = join(common, 'motion-slides-hooks');
-  /** @type {string} */
-  let configured;
-  try {
-    configured = (await run(['config', '--get', 'core.hooksPath']))
+  /** @param {string[]} args */
+  const path = async (args) =>
+    (await run(['rev-parse', '--path-format=absolute', ...args]))
       .toString('utf8')
       .replace(/\n$/, '');
-  } catch (error) {
-    if (error instanceof GitFailed && error.status === 1) {
-      throw new CannotScan(`core.hooksPath is not set, so pushes are not scanned; ${REINSTALL}`);
-    }
-    throw error;
-  }
-  if (configured !== folder) {
+  const folder = join(await path(['--git-common-dir']), 'hooks');
+  if ((await path(['--git-path', 'hooks'])) !== folder) {
     throw new CannotScan(
-      `core.hooksPath is not the motion-slides-hooks folder in the git common dir; ${REINSTALL}`,
+      `core.hooksPath sends git hooks away from <git common dir>/hooks, so pushes are not scanned; ${REINSTALL}, which removes it from this clone, and remove it from any global git config`,
     );
   }
   const hook = join(folder, 'pre-push');
   try {
     await access(hook, constants.X_OK);
   } catch {
-    throw new CannotScan(`the installed pre-push hook is missing or not executable; ${REINSTALL}`);
+    throw new CannotScan(
+      `the pre-push hook in <git common dir>/hooks is missing or not executable; ${REINSTALL}`,
+    );
   }
   /** @type {Buffer[]} */
   let pair;

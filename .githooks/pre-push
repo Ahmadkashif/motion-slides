@@ -1,27 +1,34 @@
 #!/bin/sh
 # Publish-safety scan before every push (specs/008-acceptance-and-public-release/design.md).
-# scripts/install-hooks.mjs (run by `npm ci` through `prepare`) copies this file into the git common
-# dir and points core.hooksPath there. Git runs it from the root of the pushing checkout.
+# scripts/install-hooks.mjs (run by `npm ci` through `prepare`) copies this file to
+# <git common dir>/hooks/pre-push, git's default hooks folder, which every worktree of the clone shares.
+# Git runs it from the root of the pushing checkout.
 #
-# Standard input has one line per ref: <local ref> <local id> <remote ref> <remote id>. Every local id
-# is scanned with the rest of history, so a commit that no branch reaches is still checked, and every
-# remote ref name is scanned, because the push makes it public. Deletions (an all-zero local id) push
-# nothing and are skipped, so a badly named branch can always be deleted.
+# Standard input has one line per ref: <local ref> <local id> <remote ref> <remote id>. A deletion (an
+# all-zero local id) publishes nothing, so a push of deletions only is let through without a scan; this
+# keeps a badly named branch deletable. Otherwise every local id is scanned with the rest of history, so a
+# commit that no branch reaches is still checked, and every remote ref name that is not being deleted is
+# scanned, because the push makes it public.
 
 set -u
+
+set --
+deletions=0
+while read -r local_ref local_id remote_ref remote_id; do
+  case "$local_id" in
+    *[!0]* | '') set -- "$@" --include "$local_id" --push-ref "$remote_ref" ;;
+    *) deletions=$((deletions + 1)) ;;
+  esac
+done
+
+if [ "$#" -eq 0 ] && [ "$deletions" -gt 0 ]; then
+  exit 0
+fi
 
 if [ ! -f scripts/publish-scan.mjs ]; then
   echo 'pre-push: scripts/publish-scan.mjs is missing in this checkout, so this push cannot be scanned.' >&2
   echo 'pre-push: push refused. Push from a checkout that has the scanner.' >&2
   exit 1
 fi
-
-set --
-while read -r local_ref local_id remote_ref remote_id; do
-  case "$local_id" in
-    *[!0]*) set -- "$@" --include "$local_id" --push-ref "$remote_ref" ;;
-    *) ;;
-  esac
-done
 
 exec node scripts/publish-scan.mjs "$@"

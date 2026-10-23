@@ -6,6 +6,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  renameSync,
   rmSync,
   statSync,
   writeFileSync,
@@ -37,6 +38,8 @@ const NAME = cat('K', 'i', 'm'); // #3, mixed case, short: boundary rule
 const FIVE = cat('Qu', 'ixo'); // #4, exactly five characters: substring rule
 const TERMS = [LONG, SHORT, NAME, FIVE];
 const GITHUB_TOKEN = cat('gh', 'p_', 'a1B2'.repeat(9));
+// The folder an earlier install-hooks used, through an absolute core.hooksPath.
+const OLD_FOLDER = 'motion-slides-hooks';
 const IN_HISTORY =
   'IN HISTORY: if this commit was never pushed, amend it; if it was, stop and ask the user before any history rewrite (AC4.5)';
 
@@ -204,6 +207,29 @@ function remoteRef(box: Box, remote: string, ref: string): string {
     box.root,
     box.env,
   ).stdout.trim();
+}
+
+// git's default hooks folder in the common dir, shared by every worktree of the clone.
+function hooksFolder(box: Box): string {
+  return join(git(box, 'rev-parse', '--path-format=absolute', '--git-common-dir'), 'hooks');
+}
+
+// The local core.hooksPath setting, or '' when there is none.
+function hooksPathSetting(box: Box): string {
+  return run(
+    'git',
+    ['config', '--local', '--get', 'core.hooksPath'],
+    box.repo,
+    box.env,
+  ).stdout.trim();
+}
+
+// A correct, executable copy of the hook in a folder git would only use through core.hooksPath.
+function hookCopyElsewhere(box: Box): string {
+  const elsewhere = join(box.root, 'elsewhere');
+  write(elsewhere, 'pre-push', readFileSync(join(box.repo, '.githooks/pre-push')));
+  chmodSync(join(elsewhere, 'pre-push'), 0o755);
+  return elsewhere;
 }
 
 function zipBytes(): Buffer {
@@ -661,26 +687,47 @@ describe('publish-scan opaque containers, --ci, --include and shallow clones', (
 });
 
 describe('publish-scan hook installation', () => {
-  it('install-hooks copies an executable hook into the git common dir and points core.hooksPath there', () => {
+  it('install-hooks copies an executable hook into the default hooks folder of the git common dir', () => {
     const box = makeBox();
     makeRepo(box);
-    const common = git(box, 'rev-parse', '--path-format=absolute', '--git-common-dir');
-    const folder = join(common, 'motion-slides-hooks');
-    expect(git(box, 'config', 'core.hooksPath')).toBe(folder);
-    const hook = join(folder, 'pre-push');
+    const hook = join(hooksFolder(box), 'pre-push');
     expect(statSync(hook).mode & 0o777).toBe(0o755);
     expect(readFileSync(hook)).toEqual(readFileSync(join(box.repo, '.githooks/pre-push')));
+    expect(hooksPathSetting(box)).toBe('');
   });
 
-  it('install-hooks from a linked worktree uses the folder in the shared common dir', () => {
+  it('install-hooks moves a clone off the old absolute core.hooksPath folder', () => {
     const box = makeBox();
     makeRepo(box, false);
-    const linked = join(box.root, 'linked');
-    git(box, 'worktree', 'add', '-q', linked, '-b', 'other');
-    installHooks(box, linked);
-    const common = git(box, 'rev-parse', '--path-format=absolute', '--git-common-dir');
-    expect(git(box, 'config', 'core.hooksPath')).toBe(join(common, 'motion-slides-hooks'));
-    expect(existsSync(join(common, 'motion-slides-hooks/pre-push'))).toBe(true);
+    const old = join(
+      git(box, 'rev-parse', '--path-format=absolute', '--git-common-dir'),
+      OLD_FOLDER,
+    );
+    write(old, 'pre-push', readFileSync(join(box.repo, '.githooks/pre-push')));
+    chmodSync(join(old, 'pre-push'), 0o755);
+    git(box, 'config', 'core.hooksPath', old);
+    installHooks(box, box.repo);
+    expect(hooksPathSetting(box)).toBe('');
+    expect(existsSync(old)).toBe(false);
+    expect(existsSync(join(hooksFolder(box), 'pre-push'))).toBe(true);
+    expect(scanRepo(box).code).toBe(0);
+  });
+
+  it('install-hooks from a linked worktree installs the shared hook, which scans pushes from there', () => {
+    const box = makeBox();
+    makeRepo(box, false);
+    const remote = makeRemote(box);
+    const linked = { ...box, repo: join(box.root, 'linked') };
+    git(box, 'worktree', 'add', '-q', linked.repo, '-b', 'other');
+    installHooks(box, linked.repo);
+    expect(existsSync(join(hooksFolder(box), 'pre-push'))).toBe(true);
+    write(linked.repo, 'plan.md', `Plan for ${LONG}\n`);
+    commitAll(linked, 'plan');
+    const blocked = run('git', ['push', '-q', 'origin', 'other'], linked.repo, box.env);
+    expect(blocked.code).not.toBe(0);
+    expect(`${blocked.stdout}${blocked.stderr}`).toContain('<private term #1>');
+    expect(remoteRef(box, remote, 'other')).toBe('');
+    expectNoLeak(blocked, LONG);
   });
 
   it('install-hooks outside a git work tree does nothing', () => {
@@ -702,31 +749,45 @@ describe('publish-scan hook installation', () => {
     expect(staged.stdout).toMatch(/^100755 /);
   });
 
-  it('full mode cannot scan (exit 2) when core.hooksPath is unset', () => {
+  it('full mode cannot scan (exit 2) when no hook is installed', () => {
     const box = makeBox();
     makeRepo(box, false);
     const result = scanRepo(box);
     expect(result.code).toBe(2);
-    expect(result.stderr).toMatch(/core\.hooksPath/);
+    expect(result.stderr).toMatch(
+      /missing or not executable; run node scripts\/install-hooks\.mjs/,
+    );
+    expectNoLeak(result, box.root);
   });
 
-  it('full mode cannot scan (exit 2) when core.hooksPath points elsewhere', () => {
+  it('full mode cannot scan (exit 2) when a local core.hooksPath points elsewhere', () => {
     const box = makeBox();
     makeRepo(box);
-    const elsewhere = join(box.root, 'elsewhere');
-    write(elsewhere, 'pre-push', readFileSync(join(box.repo, '.githooks/pre-push')));
-    chmodSync(join(elsewhere, 'pre-push'), 0o755);
-    git(box, 'config', 'core.hooksPath', elsewhere);
+    git(box, 'config', 'core.hooksPath', hookCopyElsewhere(box));
     const result = scanRepo(box);
     expect(result.code).toBe(2);
-    expect(result.stderr).toMatch(/core\.hooksPath/);
+    expect(result.stderr).toMatch(/core\.hooksPath.*run node scripts\/install-hooks\.mjs/);
+    expectNoLeak(result, box.root);
+  });
+
+  it('full mode cannot scan (exit 2) when a global core.hooksPath points elsewhere', () => {
+    const box = makeBox();
+    makeRepo(box);
+    const global = join(box.root, 'global.gitconfig');
+    writeFileSync(global, `[core]\n\thooksPath = ${hookCopyElsewhere(box)}\n`);
+    const result = run(process.execPath, [SCANNER], box.repo, {
+      ...box.env,
+      GIT_CONFIG_GLOBAL: global,
+    });
+    expect(result.code).toBe(2);
+    expect(result.stderr).toMatch(/core\.hooksPath.*run node scripts\/install-hooks\.mjs/);
     expectNoLeak(result, box.root);
   });
 
   it('full mode cannot scan (exit 2) when the installed hook is not executable', () => {
     const box = makeBox();
     makeRepo(box);
-    chmodSync(join(git(box, 'config', 'core.hooksPath'), 'pre-push'), 0o644);
+    chmodSync(join(hooksFolder(box), 'pre-push'), 0o644);
     const result = scanRepo(box);
     expect(result.code).toBe(2);
     expect(result.stderr).toMatch(/not executable/);
@@ -735,7 +796,7 @@ describe('publish-scan hook installation', () => {
   it('full mode cannot scan (exit 2) when the installed hook differs from .githooks/pre-push', () => {
     const box = makeBox();
     makeRepo(box);
-    const hook = join(git(box, 'config', 'core.hooksPath'), 'pre-push');
+    const hook = join(hooksFolder(box), 'pre-push');
     writeFileSync(hook, `${readFileSync(hook, 'utf8')}exit 0\n`);
     const result = scanRepo(box);
     expect(result.code).toBe(2);
@@ -793,6 +854,42 @@ describe('publish-scan pre-push hook on a real push', () => {
       'pushed-ref refs/heads/plan-<private term #1>',
     );
     expect(remoteRef(box, remote, `plan-${LONG}`)).toBe('');
+    expectNoLeak(blocked, LONG);
+  });
+
+  it('lets a deletion-only push through unscanned, so a badly named branch can be deleted', () => {
+    const box = makeBox();
+    makeRepo(box);
+    const remote = makeRemote(box);
+    expect(run('git', ['push', '-q', 'origin', 'main'], box.repo, box.env).code).toBe(0);
+    // The badly named branch reached the remote some other way; a fetch brings its name here too.
+    const bad = `refs/heads/plan-${LONG}`;
+    const made = run('git', ['--git-dir', remote, 'update-ref', bad, 'main'], box.root, box.env);
+    expect(made.code).toBe(0);
+    git(box, 'fetch', '-q', 'origin');
+    const pushes = ['push', '-q', 'origin', `:${bad}`, 'main:refs/heads/next'];
+    const mixed = run('git', pushes, box.repo, box.env);
+    expect(mixed.code).not.toBe(0);
+    expect(remoteRef(box, remote, `plan-${LONG}`)).not.toBe('');
+    const deleted = run('git', ['push', '-q', 'origin', `:${bad}`], box.repo, box.env);
+    expect(deleted.code).toBe(0);
+    expect(remoteRef(box, remote, `plan-${LONG}`)).toBe('');
+    expectNoLeak(mixed, LONG);
+    expectNoLeak(deleted, LONG);
+  });
+
+  it('still blocks a planted push after the clone is moved to another folder', () => {
+    const box = makeBox();
+    makeRepo(box);
+    const remote = makeRemote(box);
+    const moved = { ...box, repo: join(box.root, 'moved') };
+    renameSync(box.repo, moved.repo);
+    write(moved.repo, 'plan.md', `Plan for ${LONG}\n`);
+    commitAll(moved, 'plan');
+    const blocked = run('git', ['push', '-q', 'origin', 'main'], moved.repo, box.env);
+    expect(blocked.code).not.toBe(0);
+    expect(`${blocked.stdout}${blocked.stderr}`).toContain('<private term #1>');
+    expect(remoteRef(box, remote, 'main')).toBe('');
     expectNoLeak(blocked, LONG);
   });
 

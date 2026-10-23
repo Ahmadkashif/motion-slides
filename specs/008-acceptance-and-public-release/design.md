@@ -117,23 +117,28 @@ flowchart LR
   - A finding whose fingerprint is in the baseline prints `accepted by the user (baseline)` and does not
     fail.
   - Working-tree and text findings are never baselined.
-- **Hook installation.** A relative `core.hooksPath` would make git look for the hook inside whichever
-  checkout is pushing, and a checkout of an older commit has no hook file, so its pushes would run no
-  scan and print nothing. A hook file without the executable bit is skipped by git with only a hint.
-  So:
+- **Hook installation.** An absolute `core.hooksPath` goes stale when the clone is moved or renamed, and
+  git then runs no hook and says nothing. A relative one makes git look for the hook inside whichever
+  checkout is pushing, and a checkout of an older commit has no hook file. A hook file without the
+  executable bit is skipped by git with only a hint. So `core.hooksPath` is not used:
   - `package.json` has `"prepare": "node scripts/install-hooks.mjs"`. Inside a git work tree it copies
-    `.githooks/pre-push` to `<git common dir>/motion-slides-hooks/pre-push` with mode 0755 and sets
-    `core.hooksPath` to that absolute folder. The common dir is shared by every worktree and branch.
+    `.githooks/pre-push` to `<git common dir>/hooks/pre-push`, git's default hooks folder, with mode
+    0755. That folder moves with the clone and is shared by every worktree and branch. It also removes
+    a local `core.hooksPath` if one is set, and deletes `<git common dir>/motion-slides-hooks`, the
+    folder an earlier version pointed `core.hooksPath` at, so old clones migrate on the next `npm ci`.
     Outside a git work tree it does nothing.
-  - The hook runs `node scripts/publish-scan.mjs --include <id>... --push-ref <ref>...` from the
-    pushing checkout, with the local object ids and the remote ref names read from its standard input
-    (deletions, all zeros, are skipped, so a badly named branch can always be deleted). A remote ref
-    name becomes public with the push, so it is scanned before it exists (location `pushed-ref`), and
-    it is never baselined. It exits 1
-    (push blocked, with a message) if the scanner file does not exist, so a push from a checkout older
-    than the scanner is refused instead of skipped.
-  - Full mode checks that `core.hooksPath` is exactly that absolute folder, that `pre-push` exists
-    there, is executable, and is byte-identical to `.githooks/pre-push`. Any mismatch is exit 2.
+  - The hook reads its standard input first. When every line is a deletion (an all-zero local id), it
+    exits 0 without scanning: deleting a remote ref publishes nothing, and this keeps a badly named
+    branch deletable. Otherwise it runs `node scripts/publish-scan.mjs --include <id>...
+    --push-ref <ref>...` from the pushing checkout, with the local object ids and the remote ref names
+    of the lines that are not deletions. A remote ref name becomes public with the push, so it is
+    scanned before it exists (location `pushed-ref`), and it is never baselined. It exits 1 (push
+    blocked, with a message) if the scanner file does not exist, so a push from a checkout older than
+    the scanner is refused instead of skipped.
+  - Full mode checks that `git rev-parse --git-path hooks` resolves to `<git common dir>/hooks` (so no
+    `core.hooksPath`, local or global, sends hooks elsewhere), and that `pre-push` exists there, is
+    executable, and is byte-identical to `.githooks/pre-push`. Any mismatch is exit 2, with a message
+    to run `node scripts/install-hooks.mjs`.
 - **CI.** Checkout uses `fetch-depth: 0` and `persist-credentials: false`. The `verify` job runs
   `node scripts/publish-scan.mjs --ci` straight after checkout and Node setup, before `npm ci` runs any
   install script, then `devbox verify`. Finding lines carry no matched values, so the public CI log
@@ -152,8 +157,8 @@ flowchart LR
 |--------|-----------|-------|---------------|
 | `scripts/publish-scan/lib.mjs` | `scan({mode, repo, textFile?, include?, pushRefs?, env}): Promise<{code, findings}>` | git object enumeration, batch reading, rules, host facts, baseline, published-object set, fingerprints, output formatting | new |
 | `scripts/publish-scan.mjs` | CLI: `[--ci] [--text <file>] [--include <id>]... [--push-ref <ref>]...` | argument parsing (an `--include` value that is not 40 or 64 lowercase hex digits, or a `--push-ref` value that is not a `refs/` name without whitespace or control characters, is exit 2), exit codes | new |
-| `scripts/install-hooks.mjs` | run by `prepare` | work-tree detection, copy to the git common dir with mode 0755, absolute `core.hooksPath` | new |
-| `.githooks/pre-push` | git hook source (installed copy runs) | refuses the push when the pushing checkout has no scanner | new |
+| `scripts/install-hooks.mjs` | run by `prepare` | work-tree detection, copy to `<git common dir>/hooks` with mode 0755, removal of a local `core.hooksPath` and of the old hooks folder | new |
+| `.githooks/pre-push` | git hook source (installed copy runs) | lets a deletion-only push through unscanned; refuses the push when the pushing checkout has no scanner | new |
 
 ## Security
 
@@ -193,14 +198,16 @@ flowchart LR
   - an extra host fact in a file;
   - a missing list, an empty list and an unreadable list (exit 2);
   - a shallow clone in `--ci` (exit 2);
-  - full mode with `core.hooksPath` unset, pointing elsewhere, a hook with mode 0644, and a hook whose
-    bytes differ (each exit 2);
+  - full mode with no hook installed, a local or a global `core.hooksPath` pointing elsewhere, a hook
+    with mode 0644, and a hook whose bytes differ (each exit 2); the installer migrates a clone off the
+    old `motion-slides-hooks` folder;
   - a history finding prints IN HISTORY; the same finding with its fingerprint in a temporary baseline
     passes; the fingerprint changes when the key changes;
   - `--text` on a PR body with a term and one with an absolute home path;
   - after running `scripts/install-hooks.mjs` in a temporary clone, a real `git push` to a temporary
     bare remote is blocked when a term is planted and allowed when clean, and a push from a branch cut
-    before the scanner existed is blocked by the installed hook.
+    before the scanner existed is blocked by the installed hook; the same holds after the clone is moved
+    to another folder and from a linked worktree; a deletion-only push of a badly named branch passes.
 - Repository check: `node scripts/publish-scan.mjs` exits 0 on this repository's full history with the
   real private list. The output goes in progress.md; it runs locally only, because CI has no list.
 
