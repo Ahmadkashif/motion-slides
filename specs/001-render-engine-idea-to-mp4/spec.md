@@ -1,9 +1,9 @@
 ---
 feature: 001-render-engine-idea-to-mp4
 title: "Render engine: idea to MP4"
-status: draft   # draft | approved | shipped
+status: approved   # draft | approved | shipped
 lane: feature   # patch | feature | product
-appetite: 1 week   # proposed; the user sets the final appetite in grill
+appetite: 1 week   # accepted by the user on 2026-10-23
 created: 2026-10-23
 ---
 
@@ -296,24 +296,20 @@ Out of scope (explicit non-goals, so nobody builds them):
   its example command).
 - Q: Is the idea contract the issue's list? -> A: Yes, exactly, with the additions marked "added" above
   (user's breakdown).
-- Q: Preview without voice? -> Proposed: a silent preview timed at 155 words per minute (the middle of
+- Q: Preview without voice? -> A: a silent preview timed at 155 words per minute (the middle of
   the measured 151 to 159), watermarked, refused by deliver (lets 001 ship and be reviewed before the
-  weights download is approved). Pending /devbox:grill.
-- Q: What do opener, lead, gap and tail mean exactly? -> Proposed: as in AC3.1 (opener before the first
+  weights download is approved). (Accepted by the user on 2026-10-23 with the build plan.)
+- Q: What do opener, lead, gap and tail mean exactly? -> A: as in AC3.1 (opener before the first
   beat, lead before each later scene's first beat, gap between beats in a scene, tail after the last
-  beat) plus a per-beat hold. Pending /devbox:grill.
-- Q: How is the cap met? -> Proposed: one common shrink factor over all pauses and holds, floored by
-  `timing.floors` with the defaults in AC6.5 (keeps the rhythm; never touches content or speed, per P4).
-  Pending /devbox:grill.
-- Q: Unknown fields in idea.json? -> Proposed: rejected (catches typos that would otherwise silently do
-  nothing). Pending /devbox:grill.
-- Q: Network during render? -> Proposed: block every non-local request and fail, instead of the
-  hand-run pipeline's request cache (stronger guarantee, same goal: repeatable offline renders).
-  Pending /devbox:grill.
-- Q: Which frame is the poster? -> Proposed: the end of the opener, title card fully shown. Pending
-  /devbox:grill.
-- Q: Caption too long for one line? -> Proposed: fail and name the beat; the brief splits the line
-  (one line on screen is a lesson learned; auto-shrinking would break the brand type scale). Pending
-  /devbox:grill.
-- Q: Still addressing? -> Proposed: 1-based scene and beat numbers, `<scene>-<beat>+<sec>` as in the
-  issue. Pending /devbox:grill.
+  beat) plus a per-beat hold. (Accepted by the user on 2026-10-23 with the build plan.)
+- Q: How is the cap met? -> A: one common shrink factor over all pauses and holds, floored by
+  `timing.floors` with the defaults in AC6.5 (keeps the rhythm; never touches content or speed, per P4). (Accepted by the user on 2026-10-23 with the build plan.)
+- Q: Unknown fields in idea.json? -> A: rejected (catches typos that would otherwise silently do
+  nothing). (Accepted by the user on 2026-10-23 with the build plan.)
+- Q: Network during render? -> A: block every non-local request and fail, instead of the
+  hand-run pipeline's request cache (stronger guarantee, same goal: repeatable offline renders). (Accepted by the user on 2026-10-23 with the build plan.)
+- Q: Which frame is the poster? -> A: the end of the opener, title card fully shown. (Accepted by the user on 2026-10-23 with the build plan.)
+- Q: Caption too long for one line? -> A: fail and name the beat; the brief splits the line
+  (one line on screen is a lesson learned; auto-shrinking would break the brand type scale). (Accepted by the user on 2026-10-23 with the build plan.)
+- Q: Still addressing? -> A: 1-based scene and beat numbers, `<scene>-<beat>+<sec>` as in the
+  issue. (Accepted by the user on 2026-10-23 with the build plan.)

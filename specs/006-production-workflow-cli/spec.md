@@ -1,9 +1,9 @@
 ---
 feature: 006-production-workflow-cli
 title: "Production workflow CLI"
-status: draft   # draft | approved | shipped
+status: approved   # draft | approved | shipped
 lane: feature   # patch | feature | product
-appetite: 4 days   # proposed; the user sets the final appetite in grill
+appetite: 4 days   # accepted by the user on 2026-10-23
 created: 2026-10-23
 ---
 
@@ -211,13 +211,12 @@ Out of scope (explicit non-goals, so nobody builds them):
 
 - Q: Command name? -> A: `motion-slides` with new, voice, stills, render, verify, deliver, doctor (the
   user's naming; replaces the issue's example `video`).
-- Q: How does "straight through" work? -> Proposed: `new <brief> --through` runs every step in one pass;
-  each step also runs on its own. Pending /devbox:grill.
-- Q: How is sign-off given? -> Proposed: `render --signed-off-by <name>` records it against the script
-  hash, or the brief records it as already given; a changed script makes it lapse. Pending /devbox:grill.
-- Q: Notifications? -> Proposed: out of scope; deliver prints a ready-to-send message (no outward
-  communication from the tool, constitution Article IX). Pending /devbox:grill.
-- Q: Does deliver block on manual checks? -> Proposed: no; it lists them as NOT VERIFIED. Pending
-  /devbox:grill.
-- Q: An MP4 too large for the Artifact host? -> Proposed: page with the live player and poster only, and
-  say so. Pending /devbox:grill.
+- Q: How does "straight through" work? -> A: `new <brief> --through` runs every step in one pass;
+  each step also runs on its own. (Accepted by the user on 2026-10-23 with the build plan.)
+- Q: How is sign-off given? -> A: `render --signed-off-by <name>` records it against the script
+  hash, or the brief records it as already given; a changed script makes it lapse. (Accepted by the user on 2026-10-23 with the build plan.)
+- Q: Notifications? -> A: out of scope; deliver prints a ready-to-send message (no outward
+  communication from the tool, constitution Article IX). (Accepted by the user on 2026-10-23 with the build plan.)
+- Q: Does deliver block on manual checks? -> A: no; it lists them as NOT VERIFIED. (Accepted by the user on 2026-10-23 with the build plan.)
+- Q: An MP4 too large for the Artifact host? -> A: page with the live player and poster only, and
+  say so. (Accepted by the user on 2026-10-23 with the build plan.)
