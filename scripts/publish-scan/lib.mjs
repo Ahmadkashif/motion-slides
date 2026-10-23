@@ -12,6 +12,7 @@ const IN_HISTORY =
   'IN HISTORY: if this commit was never pushed, amend it; if it was, stop and ask the user before any history rewrite (AC4.5)';
 const ACCEPTED = 'accepted by the user (baseline)';
 const OBJECT_ID = /^[0-9a-f]{40}([0-9a-f]{24})?$/;
+const REF_NAME = /^refs\/[^\s\p{Cc}]{1,250}$/u;
 const CONFIG_DIR = '.config/motion-slides';
 const LIST = '~/.config/motion-slides/private-terms.txt';
 const REINSTALL = 'run node scripts/install-hooks.mjs (or npm ci)';
@@ -83,12 +84,14 @@ class GitFailed extends CannotScan {
 /**
  * Scans the repository at `repo` (modes full and ci) or one text file (mode text).
  * Codes: 0 clean, 1 findings, 2 cannot scan. `output` is for standard output, `error` for standard error.
- * @param {{ mode: Mode, repo: string, textFile?: string, include?: string[], env: NodeJS.ProcessEnv }} options
+ * `pushRefs` are the remote ref names a push is about to create or update: they become public with the
+ * push, so they are scanned like any other ref name, but they are not history and cannot be baselined.
+ * @param {{ mode: Mode, repo: string, textFile?: string, include?: string[], pushRefs?: string[], env: NodeJS.ProcessEnv }} options
  * @returns {Promise<ScanResult>}
  */
-export async function scan({ mode, repo, textFile, include = [], env }) {
+export async function scan({ mode, repo, textFile, include = [], pushRefs = [], env }) {
   try {
-    return await runScan({ mode, repo, textFile, include, env });
+    return await runScan({ mode, repo, textFile, include, pushRefs, env });
   } catch (error) {
     const reason =
       error instanceof CannotScan
@@ -104,13 +107,16 @@ export async function scan({ mode, repo, textFile, include = [], env }) {
 }
 
 /**
- * @param {{ mode: Mode, repo: string, textFile?: string, include: string[], env: NodeJS.ProcessEnv }} options
+ * @param {{ mode: Mode, repo: string, textFile?: string, include: string[], pushRefs: string[], env: NodeJS.ProcessEnv }} options
  * @returns {Promise<ScanResult>}
  */
-async function runScan({ mode, repo, textFile, include, env }) {
+async function runScan({ mode, repo, textFile, include, pushRefs, env }) {
   if (!['full', 'ci', 'text'].includes(mode)) throw new CannotScan('unknown mode');
   if (include.some((id) => !OBJECT_ID.test(id))) {
     throw new CannotScan('an --include value is not a 40 or 64 digit lowercase hex object id');
+  }
+  if (pushRefs.some((ref) => !REF_NAME.test(ref))) {
+    throw new CannotScan('a --push-ref value is not a ref name');
   }
   const home = env.HOME;
   if (!home) throw new CannotScan('HOME is not set');
@@ -132,7 +138,7 @@ async function runScan({ mode, repo, textFile, include, env }) {
     if (!textFile) throw new CannotScan('--text needs a file');
     await scanTextFile(ctx, textFile);
   } else {
-    await scanRepository(ctx, repo, include, env);
+    await scanRepository(ctx, repo, include, pushRefs, env);
   }
   return finish(ctx);
 }
@@ -164,9 +170,10 @@ async function scanTextFile(ctx, file) {
  * @param {Context} ctx
  * @param {string} repo
  * @param {string[]} include
+ * @param {string[]} pushRefs
  * @param {NodeJS.ProcessEnv} env
  */
-async function scanRepository(ctx, repo, include, env) {
+async function scanRepository(ctx, repo, include, pushRefs, env) {
   const top = (await git(repo, env, ['rev-parse', '--show-toplevel'])).toString('utf8').trim();
   /** @param {string[]} args */
   const run = (args) => git(top, env, args);
@@ -182,6 +189,15 @@ async function scanRepository(ctx, repo, include, env) {
       subject: ref,
       history: true,
       location: `ref ${labelled(ctx, ref)}`,
+      lines: false,
+    });
+  }
+
+  for (const ref of pushRefs) {
+    addHits(ctx, hits(ctx, plainView(ref)), {
+      subject: `push:${ref}`,
+      history: false,
+      location: `pushed-ref ${labelled(ctx, ref)}`,
       lines: false,
     });
   }

@@ -121,8 +121,11 @@ flowchart LR
     `.githooks/pre-push` to `<git common dir>/motion-slides-hooks/pre-push` with mode 0755 and sets
     `core.hooksPath` to that absolute folder. The common dir is shared by every worktree and branch.
     Outside a git work tree it does nothing.
-  - The hook runs `node scripts/publish-scan.mjs --include <id>...` from the pushing checkout, with
-    the local object ids read from its standard input (deletions, all zeros, are skipped). It exits 1
+  - The hook runs `node scripts/publish-scan.mjs --include <id>... --push-ref <ref>...` from the
+    pushing checkout, with the local object ids and the remote ref names read from its standard input
+    (deletions, all zeros, are skipped, so a badly named branch can always be deleted). A remote ref
+    name becomes public with the push, so it is scanned before it exists (location `pushed-ref`), and
+    it is never baselined. It exits 1
     (push blocked, with a message) if the scanner file does not exist, so a push from a checkout older
     than the scanner is refused instead of skipped.
   - Full mode checks that `core.hooksPath` is exactly that absolute folder, that `pre-push` exists
@@ -143,8 +146,8 @@ flowchart LR
 
 | Module | Interface | Hides | New / changed |
 |--------|-----------|-------|---------------|
-| `scripts/publish-scan/lib.mjs` | `scan({mode, repo, textFile?, include?, env}): Promise<{code, findings}>` | git object enumeration, batch reading, rules, host facts, baseline, published-object set, fingerprints, output formatting | new |
-| `scripts/publish-scan.mjs` | CLI: `[--ci] [--text <file>] [--include <id>]...` | argument parsing (an `--include` value that is not 40 or 64 lowercase hex digits is exit 2), exit codes | new |
+| `scripts/publish-scan/lib.mjs` | `scan({mode, repo, textFile?, include?, pushRefs?, env}): Promise<{code, findings}>` | git object enumeration, batch reading, rules, host facts, baseline, published-object set, fingerprints, output formatting | new |
+| `scripts/publish-scan.mjs` | CLI: `[--ci] [--text <file>] [--include <id>]... [--push-ref <ref>]...` | argument parsing (an `--include` value that is not 40 or 64 lowercase hex digits, or a `--push-ref` value that is not a `refs/` name without whitespace or control characters, is exit 2), exit codes | new |
 | `scripts/install-hooks.mjs` | run by `prepare` | work-tree detection, copy to the git common dir with mode 0755, absolute `core.hooksPath` | new |
 | `.githooks/pre-push` | git hook source (installed copy runs) | refuses the push when the pushing checkout has no scanner | new |
 

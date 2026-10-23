@@ -4,13 +4,15 @@
 import { scan } from './publish-scan/lib.mjs';
 
 const USAGE =
-  'usage: node scripts/publish-scan.mjs [--ci] [--text <file>] [--include <object id>]...';
+  'usage: node scripts/publish-scan.mjs [--ci] [--text <file>] [--include <object id>]... [--push-ref <ref>]...';
 const OBJECT_ID = /^[0-9a-f]{40}([0-9a-f]{24})?$/;
+// Git ref names never contain whitespace or control characters; the shape check keeps the hook honest.
+const REF_NAME = /^refs\/[^\s\p{Cc}]{1,250}$/u;
 
 /**
  * Argument values are never echoed: one could be the very thing the scan protects.
  * @param {string[]} argv
- * @returns {{ mode: 'full' | 'ci' | 'text', textFile?: string, include: string[] } | { error: string }}
+ * @returns {{ mode: 'full' | 'ci' | 'text', textFile?: string, include: string[], pushRefs: string[] } | { error: string }}
  */
 function parse(argv) {
   /** @type {'full' | 'ci' | 'text'} */
@@ -19,6 +21,8 @@ function parse(argv) {
   let textFile;
   /** @type {string[]} */
   const include = [];
+  /** @type {string[]} */
+  const pushRefs = [];
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     if (arg === '--ci' && mode === 'full') {
@@ -32,13 +36,19 @@ function parse(argv) {
         return { error: 'an --include value is not a 40 or 64 digit lowercase hex object id' };
       }
       include.push(id);
+    } else if (arg === '--push-ref') {
+      const ref = argv[++i];
+      if (ref === undefined || !REF_NAME.test(ref)) {
+        return { error: 'a --push-ref value is not a ref name' };
+      }
+      pushRefs.push(ref);
     } else {
       return { error: `unexpected argument\n${USAGE}` };
     }
   }
-  if (mode === 'text' && include.length > 0)
-    return { error: `--include does not apply to --text\n${USAGE}` };
-  return { mode, textFile, include };
+  if (mode === 'text' && (include.length > 0 || pushRefs.length > 0))
+    return { error: `--include and --push-ref do not apply to --text\n${USAGE}` };
+  return { mode, textFile, include, pushRefs };
 }
 
 /** @returns {Promise<number>} */

@@ -86,3 +86,12 @@ Follow-up: the hook passes only local object ids. A push to a remote ref whose n
 the push. Scanning the `<remote ref>` field from the hook's standard input would close this. That needs a
 design change (a new CLI argument).
 Next: the Stage 0 gate (001 T013).
+
+## 2026-10-24 00:20  build  T001 follow-up: pushed ref names
+
+Did: closed the gap the T001 worker logged: the hook now passes each pushed remote ref name as `--push-ref`,
+and the scanner checks it before the push makes it public (location `pushed-ref`, never baselined).
+Deletions are skipped so a badly named branch can always be deleted. Design updated to match.
+Evidence: two new integration tests (a push to `refs/heads/plan-<term>` is blocked with the term absent from
+the output; a malformed `--push-ref` is exit 2); publish-scan suite 41 passed; devbox verify green.
+Next: Stage 0 gate (001 T013).

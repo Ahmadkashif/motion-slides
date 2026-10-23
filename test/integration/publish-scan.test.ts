@@ -778,6 +778,34 @@ describe('publish-scan pre-push hook on a real push', () => {
     expectNoLeak(blocked, LONG);
   });
 
+  it('blocks a push to a remote branch whose name holds a term, before the name is published', () => {
+    const box = makeBox();
+    makeRepo(box);
+    const remote = makeRemote(box);
+    const blocked = run(
+      'git',
+      ['push', '-q', 'origin', `main:refs/heads/plan-${LONG}`],
+      box.repo,
+      box.env,
+    );
+    expect(blocked.code).not.toBe(0);
+    expect(`${blocked.stdout}${blocked.stderr}`).toContain(
+      'pushed-ref refs/heads/plan-<private term #1>',
+    );
+    expect(remoteRef(box, remote, `plan-${LONG}`)).toBe('');
+    expectNoLeak(blocked, LONG);
+  });
+
+  it('refuses a --push-ref value that is not a ref name (exit 2)', () => {
+    const box = makeBox();
+    makeRepo(box);
+    for (const value of ['main', 'refs/heads/a b', 'refs/heads/a\tb']) {
+      const result = scanRepo(box, '--push-ref', value);
+      expect(result.code).toBe(2);
+      expect(result.stderr).toMatch(/--push-ref value is not a ref name/);
+    }
+  });
+
   it('blocks a push from a branch cut before the scanner existed', () => {
     const box = makeBox();
     const start = makeRepo(box);
