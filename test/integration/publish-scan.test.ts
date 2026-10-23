@@ -697,6 +697,45 @@ describe('publish-scan commit and tag objects', () => {
     expect(findings(ci)).toEqual([`secret <secret:github-token> in tag ${tag} -- IN HISTORY`]);
     expectNoLeak(ci, LONG, GITHUB_TOKEN);
   });
+
+  it('scans armour-shaped text in a commit message, where git never puts a signature', () => {
+    const box = makeBox();
+    makeRepo(box);
+    const key = cat('AK', 'IA', 'Q7R6S5T4U3V2W1X0');
+    const block = [
+      '-----BEGIN PGP SIGNATURE-----',
+      '',
+      `${LONG}2026`,
+      key,
+      '-----END PGP SIGNATURE-----',
+    ];
+    git(box, 'commit', '-q', '--allow-empty', '-m', ['Release notes', '', ...block].join('\n'));
+    const commit = git(box, 'rev-parse', 'HEAD');
+    const ci = scanRepo(box, '--ci');
+    expect(ci.code).toBe(1);
+    expect(findings(ci)).toEqual([
+      `secret <secret:aws-access-key> in commit ${commit} message -- IN HISTORY`,
+    ]);
+    const full = scanRepo(box);
+    expect(findings(full)).toContain(
+      `private-term <private term #1> in commit ${commit} message -- IN HISTORY`,
+    );
+    expectNoLeak(full, LONG, key);
+    expectNoLeak(ci, LONG, key);
+  });
+
+  it('skips armour in a tag message only when it ends the message', () => {
+    const box = makeBox();
+    makeRepo(box);
+    const key = cat('AK', 'IA', 'P8O7N6M5L4K3J2I1');
+    const block = ['-----BEGIN PGP SIGNATURE-----', '', key, '-----END PGP SIGNATURE-----'];
+    git(box, 'tag', '-a', 'v4', '-m', ['Release 4', '', ...block, '', 'More notes'].join('\n'));
+    const tag = git(box, 'rev-parse', 'v4');
+    const ci = scanRepo(box, '--ci');
+    expect(ci.code).toBe(1);
+    expect(findings(ci)).toEqual([`secret <secret:aws-access-key> in tag ${tag} -- IN HISTORY`]);
+    expectNoLeak(ci, key);
+  });
 });
 
 describe('publish-scan terms outside ASCII', () => {
@@ -713,6 +752,43 @@ describe('publish-scan terms outside ASCII', () => {
       'private-term <private term #5> in worktree notes/nfd.md:1',
       'private-term <private term #5> in worktree notes/upper.md:1',
     ]);
+    expectNoLeak(result, UMLAUT, UMLAUT_TAIL);
+  });
+
+  it('flags a non-ASCII term in another letter case even when the file holds a byte that is not UTF-8', () => {
+    const box = makeBox();
+    makeRepo(box);
+    write(
+      box.repo,
+      'notes/stray.md',
+      Buffer.concat([
+        Buffer.from(`Trip ${UMLAUT.toUpperCase()} soon\n`),
+        Buffer.from([0xff, 0x0a]),
+      ]),
+    );
+    const result = scanRepo(box);
+    expect(result.code).toBe(1);
+    expect(findings(result)).toEqual([
+      'private-term <private term #5> in worktree notes/stray.md:1',
+    ]);
+    expectNoLeak(result, UMLAUT, UMLAUT_TAIL);
+  });
+
+  it('never prints a name that is not UTF-8 when a term matches it in another letter case', () => {
+    const box = makeBox();
+    makeRepo(box);
+    writeFileSync(
+      Buffer.concat([
+        Buffer.from(`${box.repo}/docs-`),
+        Buffer.from(UMLAUT.toUpperCase()),
+        Buffer.from([0xff]),
+        Buffer.from('.md'),
+      ]),
+      'Nothing private here.\n',
+    );
+    const result = scanRepo(box);
+    expect(result.code).toBe(1);
+    expect(result.stdout).toContain('<private term #5>');
     expectNoLeak(result, UMLAUT, UMLAUT_TAIL);
   });
 

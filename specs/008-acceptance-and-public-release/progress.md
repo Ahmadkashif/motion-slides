@@ -128,3 +128,14 @@ checkout (the older installer, run in a checkout that does not have this change 
 fixed it. Until every checkout of this clone has the new installer, running the old one reverts the migration,
 and this checkout's full scan then exits 2.
 Next: Stage 0 gate (001 T013).
+
+## 2026-10-24 00:10  build  T001 follow-up: QA re-check findings A and B
+
+Did: QA re-check found two remaining gaps. A: one byte that is not UTF-8 turned off letter-case and accent
+matching for a whole text file or name; text now also gets a replaced UTF-8 reading, and a name whose match
+exists only in that reading is withheld (labels only). B: armour-shaped text hid content anywhere; armour is
+now skipped only where git puts a signature (gpgsig headers, the end of a tag message or mergetag tag).
+Design updated, including two more known limits (per-worktree core.hooksPath, simple case folding).
+Evidence: four new integration tests failed first, then passed; publish-scan suite 57 passed; devbox verify
+green; the bundled Inter TTF still scans clean with the new rules (scratch clone, 0 findings).
+Next: push to PR #2; Stage 0 gate (001 T013).

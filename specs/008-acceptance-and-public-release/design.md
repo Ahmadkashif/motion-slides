@@ -64,8 +64,10 @@ flowchart LR
       the scan reads (file and blob content, paths, ref names, pushed ref names, commit and tag text)
       is matched in two readings of its bytes. The latin1 reading keeps every byte: a term matches there
       as its UTF-8 bytes and, when every character of the term fits in one byte, as latin1 bytes, so
-      latin1 files and commits with `encoding ISO-8859-1` are caught. When the bytes are valid UTF-8 and
-      not plain ASCII, the NFC form of their UTF-8 reading is matched too, case-insensitively with
+      latin1 files and commits with `encoding ISO-8859-1` are caught. When the bytes are not plain ASCII,
+      the NFC form of their UTF-8 reading is matched too (text with a stray byte that is not UTF-8 is
+      read with that byte replaced, so one bad byte cannot turn this off; binary content is read this
+      way only when it is valid UTF-8), case-insensitively with
       Unicode rules, so a made-up term `Brüm` also matches `BRÜM` and a `u` followed by a combining
       diaeresis. Host facts match the same way. The boundary rules above count only ASCII letters as
       letters, so a letter outside ASCII never blocks a match.
@@ -108,14 +110,16 @@ flowchart LR
       `committer`, `encoding`, `mergetag` and any header git does not write itself) and the full
       message. A header's continuation lines are unfolded, so a `mergetag` (a whole tag object inside
       a merge commit) is scanned too. Only text nobody wrote is left out:
-      - genuine signature armour: a `-----BEGIN PGP SIGNATURE-----` or `-----BEGIN SSH SIGNATURE-----`
-        line, its matching `-----END ... -----` line, and the lines between, when every one of those is
+      - genuine signature armour, only where git puts a signature: the whole value of a `gpgsig` or
+        `gpgsig-sha256` header, and a block that ends a tag message or the tag inside a `mergetag`
+        header. A block is a `-----BEGIN PGP SIGNATURE-----` or `-----BEGIN SSH SIGNATURE-----` line,
+        its matching `-----END ... -----` line, and the lines between, when every one of those is
         base64 (with `=` padding and the `=` CRC line), blank, or a `Version:` or `Comment:` armour
         header. Random base64 would trip short terms. The armour headers are written text and are
-        still scanned. The same rule applies inside the continuation lines of `gpgsig` and `mergetag`
-        headers. A BEGIN line followed by anything else (ordinary text, a missing END) is ordinary text,
-        scanned with what follows it, so a fake signature line hides nothing. Known limit: text made
-        only of base64 characters inside a block of the genuine shape is not scanned.
+        still scanned. Armour-shaped text anywhere else (a commit message, the middle of a tag
+        message) is ordinary text, and so is a BEGIN line followed by anything else, so a fake
+        signature hides nothing there. Known limit: text made only of base64 characters inside a
+        genuine-shaped block at the end of a tag message is not scanned.
       - lines that are exactly `tree`, `parent` or `object` and an object id, whose hex digits would
         trip short terms.
   - Ref names: `git for-each-ref --format=%(refname)` (branches, tags, remotes, stash).
@@ -128,8 +132,9 @@ flowchart LR
     `tag <oid>`, `ref <name>`, `pushed-ref <name>`, `text <file>:<line>`. Before printing, every match
     inside a printed path or ref name, in either reading, is replaced by its label, so a term in a file
     or branch name is never echoed. A name that is valid UTF-8 prints decoded, with a match found in its
-    NFC form mapped back to the characters it came from; any other name prints with its bytes that are
-    not UTF-8 replaced. Two names that print alike (an NFC and an NFD spelling) stay separate findings.
+    NFC form mapped back to the characters it came from. A name that is not UTF-8 prints with those bytes
+    replaced, unless a term matches only in its replaced UTF-8 reading: then the name is withheld and
+    only its labels print (`<name withheld: ...>`), because that match cannot be mapped back to bytes. Two names that print alike (an NFC and an NFD spelling) stay separate findings.
   - Labels: `<private term #n>` (list position), `<host name>`, `<user name>`, `<home path>`,
     `<ip address>`, `<secret:rule>`.
   - The fingerprint is the first 16 hex digits of HMAC-SHA256 under the local fingerprint key, over the
@@ -207,8 +212,13 @@ flowchart LR
     (exit 2), and anything pushed past the hook shows up as IN HISTORY on the next full scan.
   - UTF-32 text is not decoded, nor are legacy encodings other than latin1, so a term written in them is
     not found.
-  - Text made only of base64 characters inside a signature block of the genuine shape is not scanned
-    (see Scope).
+  - Text made only of base64 characters inside a genuine-shaped signature block at the end of a tag
+    message is not scanned (see Scope).
+  - A global `core.hooksPath` makes the full scan exit 2, but a `core.hooksPath` set for one linked
+    worktree only (`extensions.worktreeConfig`) is not seen from another checkout, and its pushes skip
+    the hook.
+  - Unicode matching is case-insensitive with simple case folding: `ß` does not match `SS`, dotted and
+    dotless `i` do not match each other, and full-width letters are not matched.
   - Edits made on GitHub's website (files, commits, branch names, pull request and issue text) never
     pass the hook. They are public before any check: a local full scan sees the committed ones only
     after a fetch, and CI's `--ci` scan checks them for secrets only.

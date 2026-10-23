@@ -31,6 +31,8 @@ const COMMIT_HEADERS = new Set([
 ]);
 const ID_LINE = /^(?:tree|parent|object) [0-9a-f]{40}(?:[0-9a-f]{24})?$/;
 const ARMOUR_BEGIN = /^-----BEGIN (PGP|SSH) SIGNATURE-----$/;
+// Headers whose whole value is a signature.
+const SIGNATURE_HEADERS = new Set(['gpgsig', 'gpgsig-sha256']);
 const ARMOUR_HEADER = /^(?:Version|Comment): /;
 const ARMOUR_LINE = /^(?:=?[A-Za-z0-9+/]*={0,2}|(?:Version|Comment): .*)$/;
 
@@ -375,7 +377,7 @@ function scanTree(ctx, oid, base, data) {
  * @param {Buffer} data
  */
 function scanCommit(ctx, oid, data) {
-  for (const { name, text } of objectParts(data)) {
+  for (const { name, text } of objectParts(data, 'commit')) {
     const part = name === null ? 'message' : COMMIT_HEADERS.has(name) ? name : 'header';
     addHits(ctx, textHits(ctx, text), {
       subject: oid,
@@ -393,7 +395,7 @@ function scanCommit(ctx, oid, data) {
  * @param {Buffer} data
  */
 function scanTag(ctx, oid, data) {
-  for (const { text } of objectParts(data)) {
+  for (const { text } of objectParts(data, 'tag')) {
     addHits(ctx, textHits(ctx, text), {
       subject: oid,
       history: true,
@@ -406,12 +408,15 @@ function scanTag(ctx, oid, data) {
 /**
  * The text to scan in a commit or tag object, part by part: each header by name, with its continuation
  * lines unfolded (a `mergetag` holds a whole tag object that way), then the message (name null). Only text
- * nobody wrote is left out: genuine signature armour (see withoutArmour) and lines that are exactly
- * `tree`, `parent` or `object` and an object id, whose hex digits would otherwise trip short terms.
+ * nobody wrote is left out: signature armour where git puts it, and lines that are exactly `tree`,
+ * `parent` or `object` and an object id, whose hex digits would otherwise trip short terms. Git puts a
+ * commit's signature in its `gpgsig` header, and a tag's at the very end of its message (also inside a
+ * `mergetag`), so armour-shaped text anywhere else, a commit message included, is scanned.
  * @param {Buffer} data
+ * @param {'commit' | 'tag'} kind
  * @returns {{ name: string | null, text: string }[]}
  */
-function objectParts(data) {
+function objectParts(data, kind) {
   const lines = data.toString('latin1').split('\n');
   /** @type {{ name: string, lines: string[] }[]} */
   const headers = [];
@@ -430,12 +435,45 @@ function objectParts(data) {
   /** @type {{ name: string | null, text: string }[]} */
   const parts = headers.map(({ name, lines: value }) => {
     if (value.length === 1 && ID_LINE.test(`${name} ${value[0]}`)) return { name, text: '' };
-    const kept = withoutArmour(value).filter((line) => !ID_LINE.test(line));
+    const unsigned = SIGNATURE_HEADERS.has(name)
+      ? withoutArmour(value)
+      : name === 'mergetag'
+        ? withoutTrailingArmour(value)
+        : value;
+    const kept = unsigned.filter((line) => !ID_LINE.test(line));
     return { name, text: [name, ...kept].join('\n') };
   });
-  if (i < lines.length)
-    parts.push({ name: null, text: withoutArmour(lines.slice(i + 1)).join('\n') });
+  if (i < lines.length) {
+    const message = lines.slice(i + 1);
+    parts.push({
+      name: null,
+      text: (kind === 'tag' ? withoutTrailingArmour(message) : message).join('\n'),
+    });
+  }
   return parts;
+}
+
+/**
+ * The lines without a genuine armour block that ends them (only blank lines may follow it), which is where
+ * git appends a tag's signature. Anything else is returned unchanged.
+ * @param {string[]} lines
+ * @returns {string[]}
+ */
+function withoutTrailingArmour(lines) {
+  let end = lines.length - 1;
+  while (end >= 0 && lines[end] === '') end--;
+  const kind = /^-----END (PGP|SSH) SIGNATURE-----$/.exec(lines[end] ?? '');
+  if (kind === null) return lines;
+  for (let begin = end - 1; begin >= 0; begin--) {
+    if (lines[begin] === `-----BEGIN ${kind[1]} SIGNATURE-----`) {
+      return [
+        ...lines.slice(0, begin),
+        ...lines.slice(begin + 1, end).filter((line) => ARMOUR_HEADER.test(line)),
+      ];
+    }
+    if (!ARMOUR_LINE.test(lines[begin])) return lines;
+  }
+  return lines;
 }
 
 /**
@@ -566,7 +604,10 @@ function utf16be(bytes) {
 function views(bytes, binary) {
   /** @type {View[]} */
   const found = [{ text: bytes.toString('latin1'), binary, chars: false }];
-  if (!isAscii(bytes) && isUtf8(bytes)) {
+  // Text with a stray byte that is not UTF-8 is still read as UTF-8, with that byte replaced, so one bad
+  // byte cannot turn off letter-case and accent matching for the rest. Binary content is not, because
+  // decoding random bytes would make new false matches.
+  if (!isAscii(bytes) && (!binary || isUtf8(bytes))) {
     found.push({ text: bytes.toString('utf8').normalize('NFC'), binary, chars: true });
   }
   return found;
@@ -712,6 +753,19 @@ function lineCounter(text) {
 function labelled(ctx, latin1) {
   const bytes = Buffer.from(latin1, 'latin1');
   const inBytes = hits(ctx, { text: latin1, binary: false, chars: false });
+  if (!isAscii(bytes) && !isUtf8(bytes)) {
+    // A match found only in the replaced UTF-8 reading cannot be mapped back to the bytes, so such a
+    // name is never printed, only the labels of what it holds.
+    const lossy = hits(ctx, {
+      text: bytes.toString('utf8').normalize('NFC'),
+      binary: false,
+      chars: true,
+    });
+    if (lossy.length > 0) {
+      const labels = [...new Set([...inBytes, ...lossy].map((hit) => hit.label))];
+      return `<name withheld: ${labels.join(' ')}>`;
+    }
+  }
   /** @type {string} */
   let shown;
   if (isAscii(bytes) || !isUtf8(bytes)) {
