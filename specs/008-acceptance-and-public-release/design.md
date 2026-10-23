@@ -198,6 +198,20 @@ flowchart LR
   code of the branch being pushed, so a branch that edits `scripts/publish-scan*` could weaken its own
   check. AGENTS.md lists changes to those files as ask-first, and the PR diff shows them.
 - **Limits.** Regexes have no nested quantifiers. Blobs are scanned in a single pass per rule set.
+- **Known limits** (accepted; listed so nobody relies on more than the scan gives):
+  - The hook runs the scanner of the pushing checkout as it is on disk, uncommitted edits included. An
+    uncommitted change to `scripts/publish-scan*` weakens the check for that push and shows up in no
+    diff.
+  - `git send-pack` (plumbing) does not run the pre-push hook, and `npm ci --ignore-scripts` skips
+    `prepare`, so no hook gets installed. The full scan at ship time catches a missing or wrong hook
+    (exit 2), and anything pushed past the hook shows up as IN HISTORY on the next full scan.
+  - UTF-32 text is not decoded, nor are legacy encodings other than latin1, so a term written in them is
+    not found.
+  - Text made only of base64 characters inside a signature block of the genuine shape is not scanned
+    (see Scope).
+  - Edits made on GitHub's website (files, commits, branch names, pull request and issue text) never
+    pass the hook. They are public before any check: a local full scan sees the committed ones only
+    after a fetch, and CI's `--ci` scan checks them for secrets only.
 
 ## Testing strategy
 
