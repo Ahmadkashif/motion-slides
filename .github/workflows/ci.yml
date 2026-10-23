@@ -30,12 +30,16 @@ jobs:
         with:
           node-version-file: .nvmrc
           cache: npm
+      # Publish-safety scan of the working tree and full history, secrets only (CI has no private terms
+      # list and is not the user's box). Dependency-free, so it runs before npm ci runs any install script.
+      - name: Publish-safety scan (secrets)
+        run: node scripts/publish-scan.mjs --ci
       # Interim until the 007 installer provides ffmpeg; strace backs the offline test.
       - name: Install ffmpeg and strace
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg strace
       - name: Install dependencies
         run: npm ci
       - name: Install Chrome headless shell
-        run: npx --no-install playwright-core install --only-shell chromium
+        run: npx --no-install playwright-core install --with-deps --only-shell chromium
       - name: Verify gates
         run: .devbox/bin/devbox verify

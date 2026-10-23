@@ -14,7 +14,8 @@
     "format:check": "biome format .",
     "lint": "biome check --formatter-enabled=false --error-on-warnings .",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.stage.json --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "prepare": "node scripts/install-hooks.mjs"
   },
   "dependencies": {
     "commander": "14.0.3",

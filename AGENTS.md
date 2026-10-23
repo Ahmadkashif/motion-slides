@@ -29,8 +29,10 @@ constitution article P6 (no company content) applies to every push.
 Node 24.15 (`.nvmrc`; `engines` allows `>=24.15 <25`) and npm. There is no build step: Node runs the
 TypeScript in `src/` directly and `tsc` only type-checks (ADR 0002).
 
-- Setup: `npm ci`. Rendering also needs the Chrome headless shell
-  (`npx --no-install playwright-core install --only-shell chromium`, as CI does) and `ffmpeg` on the PATH.
+- Setup: `npm ci` (its `prepare` step installs the pre-push publish-safety scan into the git common dir).
+  Rendering also needs the Chrome headless shell and its system libraries
+  (`npx --no-install playwright-core install --with-deps --only-shell chromium`, as CI does) and
+  `ffmpeg` on the PATH.
 - Run locally: `node bin/motion-slides.js --help`, or `npm link` once to put `motion-slides` on the PATH.
   Always run from this git clone: Node will not strip types from files under `node_modules`.
 - Verify, before every commit and before claiming anything is done: `devbox verify`
@@ -62,12 +64,19 @@ Always:
 - Keep changes small and on one task. Commit early with Conventional Commits that cite the task id.
 - Run `devbox verify` and show the output before saying something works.
 - Log progress in the feature's `progress.md` before ending a session.
+- Before any `gh pr create|edit|comment` or `gh issue create|edit|comment`, write the title and body to a
+  temporary file, run `node scripts/publish-scan.mjs --text <file>`, and post with `--body-file` only on
+  exit 0.
+- Evidence pasted into PR bodies and `progress.md` is summary lines only (pass and fail counts, gate
+  names, the `publish-scan:` summary line), never raw tool output with paths.
 
 Ask first:
 - Adding a dependency, a new service, or a new top-level directory.
 - Changing a public API, a database schema, CI, or anything in `.devbox/`.
 - Anything that touches auth, payments, personal data, or production infrastructure.
 - Deviating from the approved spec or design (update the doc and get approval, do not drift).
+- Changes to `scripts/publish-scan*`, `scripts/install-hooks.mjs` and `.githooks/` (the hook and CI run
+  the scanner of the branch being pushed, so a change there can weaken its own check).
 
 Never:
 - Commit secrets, credentials or `.env` files. Never print them in logs.

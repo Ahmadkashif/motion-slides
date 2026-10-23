@@ -41,3 +41,48 @@ Decisions: two 001 spec amendments (lead and gap at least 0.12 s; previews under
 build plan's delegation, flagged for the user at the PR. 008 approval covers Slice 1 (publish scan) only;
 the release slice is designed in Stage 8.
 Next: build 001 T001, then 008 T001, then the Stage 0 gate (001 T013).
+
+## 2026-10-23 23:03  build  T001
+
+Did: publish-safety scan `scripts/publish-scan.mjs` (logic in `scripts/publish-scan/lib.mjs`, no dependencies),
+hook source `.githooks/pre-push` (committed 100755) and `scripts/install-hooks.mjs`, run by the new `prepare`
+script. CI runs `node scripts/publish-scan.mjs --ci` right after Node setup, before apt and `npm ci`; the
+headless-shell step now passes `--with-deps`. AGENTS.md has the `--text` rule, the summary-only evidence rule
+and the ask-first entry for the scanner files. `tsconfig.json` now also type-checks `scripts/**/*.mjs`.
+Evidence: `.devbox/bin/devbox verify`: FORMAT, LINT, TYPECHECK, TEST (2 files, 45 tests), BUILD all pass.
+`npm test -- test/integration/publish-scan`: 39 tests pass. They cover every case in design.md's Testing
+strategy, using planted values built at run time and checking that no planted value shows up in stdout or
+stderr. Fourteen faults planted one at a time each turned a test red: camelCase on in binary, plural rule for
+any case, hook without `--include`, no byte compare, trees skipped, no UTF-16 view, paths not labelled,
+baseline ignored, opaque rule in `--ci`, no IP digit boundary, allowed list ignored, password-database home
+ignored, empty list accepted, shallow clone accepted. I unset `core.hooksPath` and removed the hooks folder,
+then ran `npm ci`: `core.hooksPath` came back as `<git common dir>/motion-slides-hooks`, and `test -x` passes
+on its `pre-push`. Repository check with the real private list, before this commit:
+`publish-scan: full, 284 objects, 3 refs, 0 findings` (exit 0); `--ci`: `publish-scan: ci, 284 objects, 3 refs,
+0 findings` (exit 0).
+Decisions (gaps the design left open, resolved here):
+- A finding line reads `<rule> <label> in <location> fingerprint <16 hex>`, then ` -- IN HISTORY: ...` or
+  ` -- accepted by the user (baseline)`. The rule ids are `private-term`, `host-name`, `user-name`,
+  `home-path`, `ip-address`, `secret` and `opaque-binary`. Labels look like `<secret:github-token>` and
+  `<opaque:zip>`. One finding per rule, label and location.
+- `<private term #n>` counts terms only (comments and blank lines are skipped). `#` starts a comment
+  anywhere on a line. A term listed twice (ignoring case) keeps its first position.
+- Tree entry names are reported as `tree <oid> <path>` (a location the design did not list), once per path,
+  with the path in the fingerprint. A name repeated across many trees is then one finding, and its baseline
+  entry survives new commits.
+- Ref-name findings count as history: they can be baselined and print the IN HISTORY advice, because a
+  pushed branch name stays visible in pull requests.
+- `<n> findings` counts failing findings only; baselined ones are listed but not counted. `<objects>` counts
+  history objects plus the working-tree files read.
+- The user name comes from the password database only (HOME gives a home path, not a user name).
+  `localhost` is never a host-name fact. Commits are scanned in author, committer and message; signatures
+  and object ids are skipped. Tag signature blocks are skipped too.
+- Secret rules have lookbehinds and minimum lengths. A key-shaped run inside a longer identifier does not
+  match, and neither do kebab-case words after `sk-`.
+- Exit-2 messages never print a path: the lists show as `~/.config/...`, and home paths in git's error text
+  are masked.
+Follow-up: the hook passes only local object ids. A push to a remote ref whose name holds a term
+(`git push origin HEAD:refs/heads/<name>`) is caught only once the remote-tracking ref exists locally, after
+the push. Scanning the `<remote ref>` field from the hook's standard input would close this. That needs a
+design change (a new CLI argument).
+Next: the Stage 0 gate (001 T013).

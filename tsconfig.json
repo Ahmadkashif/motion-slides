@@ -16,7 +16,7 @@
     "checkJs": true,
     "skipLibCheck": true
   },
-  "include": ["bin/**/*.js", "src/**/*.ts", "test/**/*.ts"],
+  "include": ["bin/**/*.js", "scripts/**/*.mjs", "src/**/*.ts", "test/**/*.ts"],
   // The browser stage has its own project (tsconfig.stage.json).
   "exclude": ["src/stage"]
 }

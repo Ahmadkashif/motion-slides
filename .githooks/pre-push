@@ -1,0 +1,28 @@
+#!/bin/sh
+# Publish-safety scan before every push (specs/008-acceptance-and-public-release/design.md).
+# scripts/install-hooks.mjs (run by `npm ci` through `prepare`) copies this file into the git common
+# dir and points core.hooksPath there. Git runs it from the root of the pushing checkout.
+#
+# Standard input has one line per ref: <local ref> <local id> <remote ref> <remote id>. Every local id
+# is scanned with the rest of history, so a commit that no branch reaches is still checked. Deletions
+# (an all-zero local id) push nothing and are skipped.
+
+set -u
+
+includes=''
+while read -r local_ref local_id remote_ref remote_id; do
+  case "$local_id" in
+    *[!0]*) includes="$includes --include $local_id" ;;
+    *) ;;
+  esac
+done
+
+if [ ! -f scripts/publish-scan.mjs ]; then
+  echo 'pre-push: scripts/publish-scan.mjs is missing in this checkout, so this push cannot be scanned.' >&2
+  echo 'pre-push: push refused. Push from a checkout that has the scanner.' >&2
+  exit 1
+fi
+
+# The ids are hex digits from git, so word splitting is safe; the scanner checks their shape again.
+# shellcheck disable=SC2086
+exec node scripts/publish-scan.mjs $includes
