@@ -1,6 +1,7 @@
 // Publish-safety scan (specs/008-acceptance-and-public-release/design.md). Dependency-free so it runs
 // from the pre-push hook and in CI before `npm ci`. It never prints a matched value: a match is named by
 // its label, and every printed path or ref name has its matches replaced by labels first.
+import { isAscii, isUtf8 } from 'node:buffer';
 import { spawn } from 'node:child_process';
 import { createHash, createHmac, randomBytes } from 'node:crypto';
 import { constants } from 'node:fs';
@@ -12,7 +13,8 @@ const IN_HISTORY =
   'IN HISTORY: if this commit was never pushed, amend it; if it was, stop and ask the user before any history rewrite (AC4.5)';
 const ACCEPTED = 'accepted by the user (baseline)';
 const OBJECT_ID = /^[0-9a-f]{40}([0-9a-f]{24})?$/;
-const REF_NAME = /^refs\/[^\s\p{Cc}]{1,250}$/u;
+// U+FFFD stands in for bytes that are not UTF-8 in Node's argv, so such a name cannot be scanned.
+const REF_NAME = /^refs\/[^\s\p{Cc}\uFFFD]{1,250}$/u;
 const CONFIG_DIR = '.config/motion-slides';
 const LIST = '~/.config/motion-slides/private-terms.txt';
 const REINSTALL = 'run node scripts/install-hooks.mjs (or npm ci)';
@@ -71,8 +73,9 @@ const PNG = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 /**
  * @typedef {'full' | 'ci' | 'text'} Mode
  * @typedef {'substring' | 'word' | 'ip4' | 'ip6'} MatchKind
- * @typedef {{ rule: string, label: string, key: string, kind: MatchKind, bytes: RegExp, chars: RegExp }} Fact
- * @typedef {{ text: string, binary: boolean, utf16: boolean }} View
+ * @typedef {{ rule: string, label: string, key: string, kind: MatchKind, bytes: RegExp, latin1: RegExp | null, chars: RegExp }} Fact
+ * @typedef {{ text: string, binary: boolean, chars: boolean }} View
+ * @typedef {{ start: number, end: number, label: string }} Span
  * @typedef {{ index: number, length: number, rule: string, label: string, key: string }} Hit
  * @typedef {{ rule: string, label: string, key: string, subject: string, history: boolean, location: string }} RawFinding
  * @typedef {{ rule: string, label: string, location: string, fingerprint: string, history: boolean, accepted: boolean, line: string }} Finding
@@ -199,7 +202,7 @@ async function scanRepository(ctx, repo, include, pushRefs, env) {
   const refs = splitLines(await run(['for-each-ref', '--format=%(refname)']));
   ctx.refs = refs.length;
   for (const ref of refs) {
-    addHits(ctx, hits(ctx, plainView(ref)), {
+    addHits(ctx, textHits(ctx, ref), {
       subject: ref,
       history: true,
       location: `ref ${labelled(ctx, ref)}`,
@@ -208,10 +211,12 @@ async function scanRepository(ctx, repo, include, pushRefs, env) {
   }
 
   for (const ref of pushRefs) {
-    addHits(ctx, hits(ctx, plainView(ref)), {
+    // Arguments arrive decoded; names everywhere else are matched as the bytes git holds.
+    const name = Buffer.from(ref, 'utf8').toString('latin1');
+    addHits(ctx, textHits(ctx, name), {
       subject: `push:${ref}`,
       history: false,
-      location: `pushed-ref ${labelled(ctx, ref)}`,
+      location: `pushed-ref ${labelled(ctx, name)}`,
       lines: false,
     });
   }
@@ -307,7 +312,7 @@ async function scanWorkTree(ctx, top, run) {
       location: `worktree ${labelled(ctx, path)}`,
       lines: false,
     };
-    addHits(ctx, hits(ctx, plainView(path)), where);
+    addHits(ctx, textHits(ctx, path), where);
     const file = Buffer.concat([Buffer.from(`${top}/`, 'utf8'), Buffer.from(path, 'latin1')]);
     /** @type {Buffer | null} */
     let bytes = null;
@@ -343,7 +348,7 @@ function scanTree(ctx, oid, base, data) {
     pos = nul + 1 + idLength;
     let found = ctx.names.get(name);
     if (found === undefined) {
-      found = hits(ctx, plainView(name));
+      found = textHits(ctx, name);
       ctx.names.set(name, found);
     }
     if (found.length === 0) continue;
@@ -372,7 +377,7 @@ function scanTree(ctx, oid, base, data) {
 function scanCommit(ctx, oid, data) {
   for (const { name, text } of objectParts(data)) {
     const part = name === null ? 'message' : COMMIT_HEADERS.has(name) ? name : 'header';
-    addHits(ctx, hits(ctx, plainView(text)), {
+    addHits(ctx, textHits(ctx, text), {
       subject: oid,
       history: true,
       location: `commit ${oid} ${part}`,
@@ -389,7 +394,7 @@ function scanCommit(ctx, oid, data) {
  */
 function scanTag(ctx, oid, data) {
   for (const { text } of objectParts(data)) {
-    addHits(ctx, hits(ctx, plainView(text)), {
+    addHits(ctx, textHits(ctx, text), {
       subject: oid,
       history: true,
       location: `tag ${oid}`,
@@ -464,8 +469,8 @@ function withoutArmour(lines) {
 
 /**
  * Every content rule on one blob, file or text: the user's allowed binaries first, then (full mode only)
- * opaque containers, then terms, host facts and secrets over the latin1 view and, when the bytes look like
- * UTF-16, over the decoded text too.
+ * opaque containers, then terms, host facts and secrets over every view of the bytes (see views) and,
+ * when the bytes look like UTF-16, over the NFC form of their UTF-16 reading too.
  * @param {Context} ctx
  * @param {Buffer} bytes
  * @param {Where} where
@@ -486,11 +491,10 @@ function scanContent(ctx, bytes, where) {
     }
   }
   const binary = bytes.subarray(0, 8192).includes(0);
-  /** @type {View[]} */
-  const views = [{ text: bytes.toString('latin1'), binary, utf16: false }];
+  const all = views(bytes, binary);
   const decoded = utf16(bytes);
-  if (decoded !== null) views.push({ text: decoded, binary, utf16: true });
-  for (const view of views) addHits(ctx, hits(ctx, view), where, view.text);
+  if (decoded !== null) all.push({ text: decoded.normalize('NFC'), binary, chars: true });
+  for (const view of all) addHits(ctx, hits(ctx, view), where, view.text);
 }
 
 /**
@@ -549,9 +553,33 @@ function utf16be(bytes) {
   return Buffer.from(even).swap16().toString('utf16le');
 }
 
-/** @param {string} text */
-function plainView(text) {
-  return { text, binary: false, utf16: false };
+/**
+ * The readings rules run over. Always the bytes as latin1, which keeps every byte: terms match there as
+ * their UTF-8 bytes and, when every character fits in one byte, as latin1. When the bytes are valid UTF-8
+ * and not plain ASCII, also the NFC form of their UTF-8 reading, where terms match case-insensitively
+ * as Unicode text, so other letter cases and decomposed accents match too. NFC keeps every newline, so
+ * line numbers agree across views.
+ * @param {Buffer} bytes
+ * @param {boolean} binary
+ * @returns {View[]}
+ */
+function views(bytes, binary) {
+  /** @type {View[]} */
+  const found = [{ text: bytes.toString('latin1'), binary, chars: false }];
+  if (!isAscii(bytes) && isUtf8(bytes)) {
+    found.push({ text: bytes.toString('utf8').normalize('NFC'), binary, chars: true });
+  }
+  return found;
+}
+
+/**
+ * Every match in a name or a commit or tag part, given as latin1 bytes, over all its views.
+ * @param {Context} ctx
+ * @param {string} latin1
+ * @returns {Hit[]}
+ */
+function textHits(ctx, latin1) {
+  return views(Buffer.from(latin1, 'latin1'), false).flatMap((view) => hits(ctx, view));
 }
 
 /**
@@ -564,14 +592,17 @@ function hits(ctx, view) {
   /** @type {Hit[]} */
   const found = [];
   for (const fact of ctx.facts) {
-    const pattern = view.utf16 ? fact.chars : fact.bytes;
-    pattern.lastIndex = 0;
-    for (let m = pattern.exec(view.text); m !== null; m = pattern.exec(view.text)) {
-      if (accepts(fact.kind, view, m.index, m[0])) {
-        const { rule, label, key } = fact;
-        found.push({ index: m.index, length: m[0].length, rule, label, key });
+    const patterns = view.chars ? [fact.chars] : [fact.bytes, fact.latin1];
+    for (const pattern of patterns) {
+      if (pattern === null) continue;
+      pattern.lastIndex = 0;
+      for (let m = pattern.exec(view.text); m !== null; m = pattern.exec(view.text)) {
+        if (accepts(fact.kind, view, m.index, m[0])) {
+          const { rule, label, key } = fact;
+          found.push({ index: m.index, length: m[0].length, rule, label, key });
+        }
+        pattern.lastIndex = m.index + 1;
       }
-      pattern.lastIndex = m.index + 1;
     }
   }
   for (const { name, pattern } of SECRET_RULES) {
@@ -591,7 +622,8 @@ const isHexOrColon = (/** @type {string} */ c) =>
   isDigit(c) || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F') || c === ':';
 
 /**
- * The boundary rules. Letters are ASCII only, so a byte outside ASCII never blocks a match.
+ * The boundary rules. Letters are ASCII only, so a byte or character outside ASCII never blocks a
+ * match.
  * @param {MatchKind} kind
  * @param {View} view
  * @param {number} index
@@ -631,13 +663,14 @@ function addHits(ctx, found, where, text = '') {
 }
 
 /**
- * One finding per rule, label and location.
+ * One finding per rule, label, subject and location. The subject counts because two names can print
+ * alike once their matches are labels.
  * @param {Context} ctx
  * @param {Hit} hit
  * @param {Where} where
  */
 function add(ctx, hit, where) {
-  const once = `${hit.rule}\0${hit.label}\0${where.location}`;
+  const once = `${hit.rule}\0${hit.label}\0${where.subject}\0${where.location}`;
   if (ctx.seen.has(once)) return;
   ctx.seen.add(once);
   const { rule, label, key } = hit;
@@ -669,33 +702,125 @@ function lineCounter(text) {
 }
 
 /**
- * A printable form of a path or ref name given as latin1 bytes: every match becomes its label,
- * overlapping matches merge into one run of labels, and control characters are escaped.
+ * A printable form of a path or ref name given as latin1 bytes: every match in any view becomes its label,
+ * overlapping matches merge into one run of labels, and control characters are escaped. A name that is
+ * valid UTF-8 prints decoded, with matches found in its NFC form mapped back to the characters they came
+ * from; any other name prints with its bytes that are not UTF-8 replaced.
  * @param {Context} ctx
  * @param {string} latin1
  */
 function labelled(ctx, latin1) {
-  const found = hits(ctx, plainView(latin1)).sort(
-    (a, b) => a.index - b.index || b.length - a.length,
+  const bytes = Buffer.from(latin1, 'latin1');
+  const inBytes = hits(ctx, { text: latin1, binary: false, chars: false });
+  /** @type {string} */
+  let shown;
+  if (isAscii(bytes) || !isUtf8(bytes)) {
+    // Byte offsets are offsets in the latin1 text; labels are ASCII, so masking keeps the bytes around them.
+    const spans = inBytes.map(({ index, length, label }) => ({
+      start: index,
+      end: index + length,
+      label,
+    }));
+    shown = Buffer.from(mask(latin1, spans), 'latin1').toString('utf8');
+  } else {
+    const text = bytes.toString('utf8');
+    const units = utf8Units(bytes);
+    const spans = inBytes.map(({ index, length, label }) => ({
+      start: units.start[index],
+      end: units.end[index + length - 1],
+      label,
+    }));
+    const nfc = nfcMapped(text);
+    for (const hit of hits(ctx, { text: nfc.text, binary: false, chars: true })) {
+      spans.push({ ...nfc.original(hit.index, hit.index + hit.length), label: hit.label });
+    }
+    shown = mask(text, spans);
+  }
+  return shown.replace(
+    /[^ -~\u00a0-\uffff]/g,
+    (c) => `\\x${c.charCodeAt(0).toString(16).padStart(2, '0')}`,
   );
+}
+
+/**
+ * `text` with every span replaced by its label; overlapping or touching spans merge into one run.
+ * @param {string} text
+ * @param {Span[]} spans
+ */
+function mask(text, spans) {
+  const sorted = [...spans].sort((a, b) => a.start - b.start || b.end - a.end);
   let out = '';
   let pos = 0;
-  for (let i = 0; i < found.length; ) {
-    const start = found[i].index;
+  for (let i = 0; i < sorted.length; ) {
+    const start = sorted[i].start;
     let end = start;
     /** @type {string[]} */
     const labels = [];
-    for (; i < found.length && found[i].index <= end; i++) {
-      end = Math.max(end, found[i].index + found[i].length);
-      if (!labels.includes(found[i].label)) labels.push(found[i].label);
+    for (; i < sorted.length && sorted[i].start <= end; i++) {
+      end = Math.max(end, sorted[i].end);
+      if (!labels.includes(sorted[i].label)) labels.push(sorted[i].label);
     }
-    out += latin1.slice(pos, start) + labels.join('');
+    out += text.slice(pos, start) + labels.join('');
     pos = end;
   }
-  out += latin1.slice(pos);
-  return Buffer.from(out, 'latin1')
-    .toString('utf8')
-    .replace(/[^ -~ -￿]/g, (c) => `\\x${c.charCodeAt(0).toString(16).padStart(2, '0')}`);
+  return out + text.slice(pos);
+}
+
+/**
+ * For each byte of valid UTF-8, the UTF-16 index where its character starts and where it ends.
+ * @param {Buffer} bytes
+ */
+function utf8Units(bytes) {
+  /** @type {number[]} */
+  const start = [];
+  /** @type {number[]} */
+  const end = [];
+  let unit = 0;
+  for (let b = 0; b < bytes.length; ) {
+    const lead = bytes[b];
+    const size = lead < 0x80 ? 1 : lead < 0xe0 ? 2 : lead < 0xf0 ? 3 : 4;
+    const width = size === 4 ? 2 : 1;
+    for (let k = 0; k < size; k++) {
+      start.push(unit);
+      end.push(unit + width);
+    }
+    unit += width;
+    b += size;
+  }
+  return { start, end };
+}
+
+/**
+ * The NFC form of `text`, and a map from a range of it back to the range of `text` it came from. NFC
+ * never joins a character to an ASCII character after it, so the text is normalized in pieces that each
+ * start at an ASCII character (or at the start), and a range maps back to whole pieces.
+ * @param {string} text
+ */
+function nfcMapped(text) {
+  /** @type {number[]} */
+  const from = [];
+  /** @type {number[]} */
+  const to = [];
+  let nfc = '';
+  for (let pos = 0, next = 1; pos < text.length; pos = next, next += 1) {
+    while (next < text.length && text.charCodeAt(next) >= 0x80) next++;
+    from.push(pos);
+    to.push(nfc.length);
+    nfc += text.slice(pos, next).normalize('NFC');
+  }
+  from.push(text.length);
+  to.push(nfc.length);
+  /** @param {number} index a position inside the NFC form */
+  const piece = (index) => {
+    let k = 0;
+    while (to[k + 1] <= index) k++;
+    return k;
+  };
+  return {
+    text: nfc,
+    /** @param {number} start @param {number} end */
+    original: (start, end) => ({ start: from[piece(start)], end: from[piece(end - 1) + 1] }),
+  };
 }
 
 /**
@@ -748,7 +873,7 @@ async function readTerms(home) {
   /** @type {string[]} */
   const terms = [];
   for (const line of content.split(/\r?\n/)) {
-    const term = line.trim();
+    const term = line.trim().normalize('NFC');
     if (term === '' || term.startsWith('#')) continue;
     if (!terms.some((t) => t.toLowerCase() === term.toLowerCase())) terms.push(term);
   }
@@ -844,8 +969,9 @@ function hostFacts(env) {
 }
 
 /**
- * One fact, compiled for both views: `bytes` matches the UTF-8 bytes of the text in a latin1 view,
- * `chars` matches the text itself in a decoded UTF-16 view. Both ignore case.
+ * One fact, compiled for every view, all ignoring case: `bytes` matches its UTF-8 bytes in a latin1 view,
+ * `latin1` matches its latin1 bytes there (only for text outside ASCII whose every character fits in one
+ * byte, else null), and `chars` matches its NFC form in a decoded view, Unicode-aware.
  * @param {string} rule
  * @param {string} label
  * @param {MatchKind} kind
@@ -854,13 +980,16 @@ function hostFacts(env) {
  */
 function fact(rule, label, kind, text) {
   const literal = (/** @type {string} */ s) => s.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&');
+  const nfc = text.normalize('NFC');
+  const oneByte = [...nfc].every((c) => (c.codePointAt(0) ?? 0) <= 0xff);
   return {
     rule,
     label,
     kind,
-    key: text.toLowerCase(),
-    bytes: new RegExp(literal(Buffer.from(text, 'utf8').toString('latin1')), 'gi'),
-    chars: new RegExp(literal(text), 'gi'),
+    key: nfc.toLowerCase(),
+    bytes: new RegExp(literal(Buffer.from(nfc, 'utf8').toString('latin1')), 'gi'),
+    latin1: !isAscii(Buffer.from(nfc)) && oneByte ? new RegExp(literal(nfc), 'giu') : null,
+    chars: new RegExp(literal(nfc), 'giu'),
   };
 }
 

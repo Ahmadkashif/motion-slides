@@ -36,7 +36,10 @@ const LONG = cat('North', 'wind'); // #1, nine characters: substring rule
 const SHORT = cat('Q', 'R', 'X'); // #2, all caps, short: boundary rule
 const NAME = cat('K', 'i', 'm'); // #3, mixed case, short: boundary rule
 const FIVE = cat('Qu', 'ixo'); // #4, exactly five characters: substring rule
-const TERMS = [LONG, SHORT, NAME, FIVE];
+const UMLAUT = cat('Z\u00fc', 'rnwald'); // #5, not ASCII: substring rule
+const TERMS = [LONG, SHORT, NAME, FIVE, UMLAUT];
+// The term's ASCII tail, which a latin1 or broken decoding would still print.
+const UMLAUT_TAIL = UMLAUT.slice(2);
 const GITHUB_TOKEN = cat('gh', 'p_', 'a1B2'.repeat(9));
 // The folder an earlier install-hooks used, through an absolute core.hooksPath.
 const OLD_FOLDER = 'motion-slides-hooks';
@@ -144,10 +147,10 @@ function scanText(box: Box, body: string): Run {
   return run(process.execPath, [SCANNER, '--text', file], box.root, box.env);
 }
 
-// The output never carries a planted value, in any letter case.
+// The output never carries a planted value, in any letter case or Unicode normal form.
 function expectNoLeak(result: Run, ...planted: string[]): void {
-  const output = `${result.stdout}\n${result.stderr}`.toLowerCase();
-  for (const value of planted) expect(output).not.toContain(value.toLowerCase());
+  const output = `${result.stdout}\n${result.stderr}`.normalize('NFC').toLowerCase();
+  for (const value of planted) expect(output).not.toContain(value.normalize('NFC').toLowerCase());
 }
 
 function findingLines(result: Run): string[] {
@@ -696,6 +699,98 @@ describe('publish-scan commit and tag objects', () => {
   });
 });
 
+describe('publish-scan terms outside ASCII', () => {
+  it('flags a non-ASCII term in upper-case UTF-8, in NFD and in a latin1 file', () => {
+    const box = makeBox();
+    makeRepo(box);
+    write(box.repo, 'notes/upper.md', `About ${UMLAUT.toUpperCase()}\n`);
+    write(box.repo, 'notes/nfd.md', `About ${UMLAUT.normalize('NFD')}\n`);
+    write(box.repo, 'notes/latin1.txt', Buffer.from(`Line one\nAbout ${UMLAUT}\n`, 'latin1'));
+    const result = scanRepo(box);
+    expect(result.code).toBe(1);
+    expect(findings(result)).toEqual([
+      'private-term <private term #5> in worktree notes/latin1.txt:2',
+      'private-term <private term #5> in worktree notes/nfd.md:1',
+      'private-term <private term #5> in worktree notes/upper.md:1',
+    ]);
+    expectNoLeak(result, UMLAUT, UMLAUT_TAIL);
+  });
+
+  it('flags a non-ASCII term in a commit message stored as ISO-8859-1', () => {
+    const box = makeBox();
+    makeRepo(box);
+    const message = join(box.root, 'message.txt');
+    writeFileSync(message, Buffer.from(`Notes for ${UMLAUT}\n`, 'latin1'));
+    git(
+      box,
+      '-c',
+      'i18n.commitEncoding=ISO-8859-1',
+      'commit',
+      '-q',
+      '--allow-empty',
+      '-F',
+      message,
+    );
+    expect(git(box, 'cat-file', 'commit', 'HEAD')).toContain('\nencoding ISO-8859-1\n');
+    const commit = git(box, 'rev-parse', 'HEAD');
+    const result = scanRepo(box);
+    expect(result.code).toBe(1);
+    expect(findings(result)).toEqual([
+      `private-term <private term #5> in commit ${commit} message -- IN HISTORY`,
+    ]);
+    expectNoLeak(result, UMLAUT, UMLAUT_TAIL);
+  });
+
+  it('masks a non-ASCII term in printed paths, whatever its letter case, normal form or encoding', () => {
+    const box = makeBox();
+    makeRepo(box);
+    write(box.repo, `docs/${UMLAUT.toUpperCase()}-plan.md`, 'Nothing private here.\n');
+    write(box.repo, `docs/${UMLAUT}.md`, 'Nothing private here.\n');
+    write(box.repo, `docs/${UMLAUT.normalize('NFD')}.md`, 'Nothing private here.\n');
+    writeFileSync(
+      Buffer.concat([Buffer.from(`${box.repo}/docs/`), Buffer.from(`${UMLAUT}-old.md`, 'latin1')]),
+      'Nothing private here.\n',
+    );
+    commitAll(box, 'add docs');
+    const docs = git(box, 'rev-parse', 'HEAD:docs');
+    const result = scanRepo(box);
+    expect(result.code).toBe(1);
+    // The NFC and NFD names print alike; each is still its own finding.
+    expect(findings(result)).toEqual(
+      [
+        `private-term <private term #5> in tree ${docs} docs/<private term #5>-old.md -- IN HISTORY`,
+        `private-term <private term #5> in tree ${docs} docs/<private term #5>-plan.md -- IN HISTORY`,
+        `private-term <private term #5> in tree ${docs} docs/<private term #5>.md -- IN HISTORY`,
+        `private-term <private term #5> in tree ${docs} docs/<private term #5>.md -- IN HISTORY`,
+        'private-term <private term #5> in worktree docs/<private term #5>-old.md',
+        'private-term <private term #5> in worktree docs/<private term #5>-plan.md',
+        'private-term <private term #5> in worktree docs/<private term #5>.md',
+        'private-term <private term #5> in worktree docs/<private term #5>.md',
+      ].sort(),
+    );
+    expectNoLeak(result, UMLAUT, UMLAUT_TAIL);
+  });
+
+  it('blocks a push to a remote branch whose name holds a non-ASCII term in another letter case', () => {
+    const box = makeBox();
+    makeRepo(box);
+    const remote = makeRemote(box);
+    const name = `plan-${UMLAUT.toUpperCase()}`;
+    const blocked = run(
+      'git',
+      ['push', '-q', 'origin', `main:refs/heads/${name}`],
+      box.repo,
+      box.env,
+    );
+    expect(blocked.code).not.toBe(0);
+    expect(`${blocked.stdout}${blocked.stderr}`).toContain(
+      'pushed-ref refs/heads/plan-<private term #5>',
+    );
+    expect(remoteRef(box, remote, name)).toBe('');
+    expectNoLeak(blocked, UMLAUT, UMLAUT_TAIL);
+  });
+});
+
 describe('publish-scan opaque containers, --ci, --include and shallow clones', () => {
   it('flags a zip and a PDF as opaque in full mode, in the working tree and in history', () => {
     const box = makeBox();
@@ -1025,7 +1120,8 @@ describe('publish-scan pre-push hook on a real push', () => {
   it('refuses a --push-ref value that is not a ref name (exit 2)', () => {
     const box = makeBox();
     makeRepo(box);
-    for (const value of ['main', 'refs/heads/a b', 'refs/heads/a\tb']) {
+    // U+FFFD is what bytes that are not UTF-8 become in Node's argv, so the name cannot be scanned.
+    for (const value of ['main', 'refs/heads/a b', 'refs/heads/a\tb', 'refs/heads/a\ufffdb']) {
       const result = scanRepo(box, '--push-ref', value);
       expect(result.code).toBe(2);
       expect(result.stderr).toMatch(/--push-ref value is not a ref name/);

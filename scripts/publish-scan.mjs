@@ -7,7 +7,8 @@ const USAGE =
   'usage: node scripts/publish-scan.mjs [--ci] [--text <file>] [--include <object id>]... [--push-ref <ref>]...';
 const OBJECT_ID = /^[0-9a-f]{40}([0-9a-f]{24})?$/;
 // Git ref names never contain whitespace or control characters; the shape check keeps the hook honest.
-const REF_NAME = /^refs\/[^\s\p{Cc}]{1,250}$/u;
+// U+FFFD stands in for bytes that are not UTF-8 in Node's argv, so such a name cannot be scanned.
+const REF_NAME = /^refs\/[^\s\p{Cc}\uFFFD]{1,250}$/u;
 
 /**
  * Argument values are never echoed: one could be the very thing the scan protects.

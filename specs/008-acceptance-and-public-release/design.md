@@ -60,6 +60,15 @@ flowchart LR
     - In binary content (a blob or file with a NUL byte in its first 8 KB) the camelCase exception is
       off, because glyph and table data produce letter runs that look like camelCase (the bundled font
       had six such hits for one short term, all through that exception). Every other rule applies.
+    - Text outside ASCII. The list is read as UTF-8 and each term is taken in its NFC form. Every text
+      the scan reads (file and blob content, paths, ref names, pushed ref names, commit and tag text)
+      is matched in two readings of its bytes. The latin1 reading keeps every byte: a term matches there
+      as its UTF-8 bytes and, when every character of the term fits in one byte, as latin1 bytes, so
+      latin1 files and commits with `encoding ISO-8859-1` are caught. When the bytes are valid UTF-8 and
+      not plain ASCII, the NFC form of their UTF-8 reading is matched too, case-insensitively with
+      Unicode rules, so a made-up term `Brüm` also matches `BRÜM` and a `u` followed by a combining
+      diaeresis. Host facts match the same way. The boundary rules above count only ASCII letters as
+      letters, so a letter outside ASCII never blocks a match.
   - Host identity, computed at run time: the host name and its short form, the user name and home
     folder from the password database (`os.userInfo()`, so a changed `HOME` does not hide them) and
     from `HOME`, and every non-loopback, non-link-local IP address of this box. The user name matches
@@ -87,9 +96,9 @@ flowchart LR
       (`git replace`) makes git show a stand-in wherever it reads the replaced object, while a push still
       sends the original. The replacements stay in scope: their `refs/replace/*` refs are refs like any
       other.
-    - Blobs are scanned as bytes decoded as latin1, so binary files are covered too. A blob with a
-      UTF-16 byte-order mark, or with NUL in every other byte of its first 1 KB, is also decoded as
-      UTF-16.
+    - Blobs are scanned as bytes in the readings above (latin1, so binary files are covered too, and
+      NFC UTF-8 when valid). A blob with a UTF-16 byte-order mark, or with NUL in every other byte of
+      its first 1 KB, is also decoded as UTF-16 and matched in its NFC form.
     - Opaque containers cannot be read by a byte scan, so in full mode a blob whose first bytes mark
       one (zip and Office files, PDF, gzip, bzip2, xz, zstd, 7z, WOFF and WOFF2, or a PNG with `zTXt`
       or `iTXt` chunks) is a finding unless its SHA-256 is in the user's allowed-binaries file. `--ci`
@@ -116,8 +125,11 @@ flowchart LR
 - **Output never contains a matched value.** One line per finding: rule id, location and fingerprint.
   - Locations: `worktree <path>:<line>`, `blob <oid> <path>`, `tree <oid> <path>`,
     `commit <oid> <header>|message` (a header git does not write itself prints as `header`),
-    `tag <oid>`, `ref <name>`, `pushed-ref <name>`, `text <file>:<line>`. Before printing, every match inside a printed
-    path or ref name is replaced by its label, so a term in a file or branch name is never echoed.
+    `tag <oid>`, `ref <name>`, `pushed-ref <name>`, `text <file>:<line>`. Before printing, every match
+    inside a printed path or ref name, in either reading, is replaced by its label, so a term in a file
+    or branch name is never echoed. A name that is valid UTF-8 prints decoded, with a match found in its
+    NFC form mapped back to the characters it came from; any other name prints with its bytes that are
+    not UTF-8 replaced. Two names that print alike (an NFC and an NFD spelling) stay separate findings.
   - Labels: `<private term #n>` (list position), `<host name>`, `<user name>`, `<home path>`,
     `<ip address>`, `<secret:rule>`.
   - The fingerprint is the first 16 hex digits of HMAC-SHA256 under the local fingerprint key, over the
@@ -171,7 +183,7 @@ flowchart LR
 | Module | Interface | Hides | New / changed |
 |--------|-----------|-------|---------------|
 | `scripts/publish-scan/lib.mjs` | `scan({mode, repo, textFile?, include?, pushRefs?, env}): Promise<{code, findings}>` | git object enumeration, batch reading, rules, host facts, baseline, published-object set, fingerprints, output formatting | new |
-| `scripts/publish-scan.mjs` | CLI: `[--ci] [--text <file>] [--include <id>]... [--push-ref <ref>]...` | argument parsing (an `--include` value that is not 40 or 64 lowercase hex digits, or a `--push-ref` value that is not a `refs/` name without whitespace or control characters, is exit 2), exit codes | new |
+| `scripts/publish-scan.mjs` | CLI: `[--ci] [--text <file>] [--include <id>]... [--push-ref <ref>]...` | argument parsing (an `--include` value that is not 40 or 64 lowercase hex digits, or a `--push-ref` value that is not a `refs/` name without whitespace, control characters or U+FFFD, is exit 2; Node turns bytes that are not UTF-8 in its arguments into U+FFFD, so such a name could not be scanned as git holds it), exit codes | new |
 | `scripts/install-hooks.mjs` | run by `prepare` | work-tree detection, copy to `<git common dir>/hooks` with mode 0755, removal of a local `core.hooksPath` and of the old hooks folder | new |
 | `.githooks/pre-push` | git hook source (installed copy runs) | lets a deletion-only push through unscanned; refuses the push when the pushing checkout has no scanner | new |
 
@@ -196,6 +208,10 @@ flowchart LR
   the planted value:
   - a secret in a blob deleted by a later commit;
   - a secret inside a binary file, and a term inside a UTF-16 file;
+  - a made-up term outside ASCII in upper-case UTF-8, in NFD and in a latin1 file, in a commit message
+    stored as ISO-8859-1, in a pushed ref name in another letter case (blocked), and in paths in upper
+    case, NFC, NFD and latin1, each printed masked;
+  - a term containing `#`, and comment lines with and without leading spaces;
   - a non-opaque binary file with a short-term hit is flagged in the working tree and in history, and
     passes once its hash is in the user's allowed-binaries file; a binary with a lowercase letter before
     an uppercase-start short term is not flagged, while the same shape in a text file (`myQrx`) is;
