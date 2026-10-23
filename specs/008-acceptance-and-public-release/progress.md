@@ -95,3 +95,36 @@ Deletions are skipped so a badly named branch can always be deleted. Design upda
 Evidence: two new integration tests (a push to `refs/heads/plan-<term>` is blocked with the term absent from
 the output; a malformed `--push-ref` is exit 2); publish-scan suite 41 passed; devbox verify green.
 Next: Stage 0 gate (001 T013).
+
+## 2026-10-23 23:54  build  T001 follow-up: QA findings on the publish scan
+
+Did: fixed the QA findings. `vitest.config.ts` keeps `.claude/**` (agent worktrees) out of `npm test`. Every git
+command of the scan runs with `GIT_NO_REPLACE_OBJECTS=1`, so a `git replace` stand-in hides nothing. The hook
+now lives in `<git common dir>/hooks/pre-push`, git's default folder, which moves with the clone and is shared by
+every worktree; install-hooks removes a local `core.hooksPath` and the old `motion-slides-hooks` folder, and full
+mode checks that `git rev-parse --git-path hooks` resolves there. Commit and tag objects are scanned whole (every
+header, `mergetag` and `encoding` included, and the message), skipping only genuine signature armour and exact
+object-id lines. Terms and host facts match outside ASCII (NFC, Unicode case-insensitive, plus latin1 bytes), in
+content, names, commits and pushed refs, and printed names are masked in both readings. A deletion-only push
+passes unscanned. `#` starts a comment only at the start of a line. Known limits are listed in design.md.
+Evidence: `npm test -- test/integration/publish-scan`: 53 passed (12 new, 9 updated). Each new test was run red
+before its fix, for the expected reason; three mutations of the non-ASCII code each turned tests red.
+`.devbox/bin/devbox verify`: FORMAT, LINT, TYPECHECK, TEST (2 files, 59 tests), BUILD all pass.
+`node scripts/install-hooks.mjs` migrated this clone (no `core.hooksPath`; hook executable and byte-identical;
+old folder gone). Repository check with the real private list: `publish-scan: full, 497 objects, 4 refs,
+0 findings` (exit 0); `--ci`: `publish-scan: ci, 497 objects, 4 refs, 0 findings`.
+Decisions:
+- `Version:` and `Comment:` lines inside genuine armour are still scanned (written text); only base64 and blank
+  lines are skipped. Lines that are exactly `tree|parent|object <id>` are skipped (hex trips short terms).
+- A commit header git does not write itself prints as `header`, so a crafted header name is never echoed.
+- `--push-ref` refuses U+FFFD: Node turns argument bytes that are not UTF-8 into it, so such a name cannot be
+  scanned as git holds it (fail closed).
+- Findings are kept per rule, label, subject and location, so two names that print alike stay two findings.
+- The hook exits 0 only when it read at least one line and every line is a deletion; an empty local id is
+  passed on and refused (exit 2).
+- tasks.md T001 Verify now names `<git common dir>/hooks/pre-push` with no `core.hooksPath`.
+Note: during this session the shared git config went back to the old `core.hooksPath` once, from outside this
+checkout (the older installer, run in a checkout that does not have this change yet). Re-running install-hooks
+fixed it. Until every checkout of this clone has the new installer, running the old one reverts the migration,
+and this checkout's full scan then exits 2.
+Next: Stage 0 gate (001 T013).
