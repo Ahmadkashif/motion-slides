@@ -16,6 +16,21 @@ const REF_NAME = /^refs\/[^\s\p{Cc}]{1,250}$/u;
 const CONFIG_DIR = '.config/motion-slides';
 const LIST = '~/.config/motion-slides/private-terms.txt';
 const REINSTALL = 'run node scripts/install-hooks.mjs (or npm ci)';
+// Header names git writes in a commit; any other is reported as `header`.
+const COMMIT_HEADERS = new Set([
+  'tree',
+  'parent',
+  'author',
+  'committer',
+  'encoding',
+  'mergetag',
+  'gpgsig',
+  'gpgsig-sha256',
+]);
+const ID_LINE = /^(?:tree|parent|object) [0-9a-f]{40}(?:[0-9a-f]{24})?$/;
+const ARMOUR_BEGIN = /^-----BEGIN (PGP|SSH) SIGNATURE-----$/;
+const ARMOUR_HEADER = /^(?:Version|Comment): /;
+const ARMOUR_LINE = /^(?:=?[A-Za-z0-9+/]*={0,2}|(?:Version|Comment): .*)$/;
 
 // Secret shapes. Lookbehinds keep a key-like run inside a longer identifier from matching. No rule has a
 // nested quantifier.
@@ -348,22 +363,15 @@ function scanTree(ctx, oid, base, data) {
 }
 
 /**
- * Commits raw: the author and committer lines and the full message. Signatures and object ids are not
- * text anyone wrote, so they are left out.
+ * Commits raw: every header and the message, each reported by name (`header` for a name git does not
+ * write itself, so a crafted header name is never printed).
  * @param {Context} ctx
  * @param {string} oid
  * @param {Buffer} data
  */
 function scanCommit(ctx, oid, data) {
-  const { header, message } = splitObject(data);
-  /** @type {[string, string][]} */
-  const parts = [];
-  for (const line of header.split('\n')) {
-    if (line.startsWith('author ')) parts.push(['author', line.slice(7)]);
-    else if (line.startsWith('committer ')) parts.push(['committer', line.slice(10)]);
-  }
-  if (message !== null) parts.push(['message', message]);
-  for (const [part, text] of parts) {
+  for (const { name, text } of objectParts(data)) {
+    const part = name === null ? 'message' : COMMIT_HEADERS.has(name) ? name : 'header';
     addHits(ctx, hits(ctx, plainView(text)), {
       subject: oid,
       history: true,
@@ -374,21 +382,13 @@ function scanCommit(ctx, oid, data) {
 }
 
 /**
- * Annotated tags raw: the tag name, the tagger and the message, without a trailing signature block.
+ * Annotated tags raw: every header and the message.
  * @param {Context} ctx
  * @param {string} oid
  * @param {Buffer} data
  */
 function scanTag(ctx, oid, data) {
-  const { header, message } = splitObject(data);
-  const texts = header
-    .split('\n')
-    .filter((line) => line.startsWith('tag ') || line.startsWith('tagger '));
-  if (message !== null) {
-    const signature = message.search(/^-----BEGIN (PGP|SSH) SIGNATURE-----$/m);
-    texts.push(signature === -1 ? message : message.slice(0, signature));
-  }
-  for (const text of texts) {
+  for (const { text } of objectParts(data)) {
     addHits(ctx, hits(ctx, plainView(text)), {
       subject: oid,
       history: true,
@@ -398,13 +398,68 @@ function scanTag(ctx, oid, data) {
   }
 }
 
-/** @param {Buffer} data */
-function splitObject(data) {
-  const text = data.toString('latin1');
-  const split = text.indexOf('\n\n');
-  return split === -1
-    ? { header: text, message: null }
-    : { header: text.slice(0, split), message: text.slice(split + 2) };
+/**
+ * The text to scan in a commit or tag object, part by part: each header by name, with its continuation
+ * lines unfolded (a `mergetag` holds a whole tag object that way), then the message (name null). Only text
+ * nobody wrote is left out: genuine signature armour (see withoutArmour) and lines that are exactly
+ * `tree`, `parent` or `object` and an object id, whose hex digits would otherwise trip short terms.
+ * @param {Buffer} data
+ * @returns {{ name: string | null, text: string }[]}
+ */
+function objectParts(data) {
+  const lines = data.toString('latin1').split('\n');
+  /** @type {{ name: string, lines: string[] }[]} */
+  const headers = [];
+  let i = 0;
+  for (; i < lines.length && lines[i] !== ''; i++) {
+    const line = lines[i];
+    const last = headers.at(-1);
+    if (line.startsWith(' ') && last !== undefined) {
+      last.lines.push(line.slice(1));
+    } else {
+      const space = line.indexOf(' ');
+      if (space === -1) headers.push({ name: line, lines: [] });
+      else headers.push({ name: line.slice(0, space), lines: [line.slice(space + 1)] });
+    }
+  }
+  /** @type {{ name: string | null, text: string }[]} */
+  const parts = headers.map(({ name, lines: value }) => {
+    if (value.length === 1 && ID_LINE.test(`${name} ${value[0]}`)) return { name, text: '' };
+    const kept = withoutArmour(value).filter((line) => !ID_LINE.test(line));
+    return { name, text: [name, ...kept].join('\n') };
+  });
+  if (i < lines.length)
+    parts.push({ name: null, text: withoutArmour(lines.slice(i + 1)).join('\n') });
+  return parts;
+}
+
+/**
+ * The lines without genuine signature armour: a `-----BEGIN PGP|SSH SIGNATURE-----` line, its matching
+ * END line, and the lines between, when every one of those is base64 (with `=` padding and the `=` CRC
+ * line), blank, or a `Version:` or `Comment:` armour header. Random base64 would trip short terms, so it
+ * is left out; the armour headers are written text and stay. A BEGIN line whose block has any other
+ * shape is ordinary text, scanned with the lines after it.
+ * @param {string[]} lines
+ * @returns {string[]}
+ */
+function withoutArmour(lines) {
+  /** @type {string[]} */
+  const kept = [];
+  for (let i = 0; i < lines.length; i++) {
+    const begin = ARMOUR_BEGIN.exec(lines[i]);
+    if (begin !== null) {
+      const end = `-----END ${begin[1]} SIGNATURE-----`;
+      let j = i + 1;
+      while (j < lines.length && lines[j] !== end && ARMOUR_LINE.test(lines[j])) j++;
+      if (j < lines.length && lines[j] === end) {
+        kept.push(...lines.slice(i + 1, j).filter((line) => ARMOUR_HEADER.test(line)));
+        i = j;
+        continue;
+      }
+    }
+    kept.push(lines[i]);
+  }
+  return kept;
 }
 
 /**

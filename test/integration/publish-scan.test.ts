@@ -232,6 +232,36 @@ function hookCopyElsewhere(box: Box): string {
   return elsewhere;
 }
 
+// Writes a raw object, so a test can hold headers that need a signing key to make the usual way.
+function hashObject(box: Box, type: string, content: string | Buffer): string {
+  const result = spawnSync('git', ['hash-object', '-t', type, '-w', '--stdin'], {
+    cwd: box.repo,
+    env: box.env,
+    input: content,
+    encoding: 'utf8',
+  });
+  if (result.status !== 0) throw new Error(`git hash-object failed: ${result.stderr}`);
+  return result.stdout.trim();
+}
+
+// A signature block of the genuine shape whose base64 happens to hold the short term between digits, as
+// random signature data can. A scan must skip it rather than flag it.
+function armour(kind = 'PGP'): string[] {
+  return [
+    `-----BEGIN ${kind} SIGNATURE-----`,
+    '',
+    `iQEzBAABCAAdFiEE7${SHORT}4wq+/Ux0`,
+    'Zm9vYmFyYmF6cXV4',
+    `=${SHORT}9`,
+    `-----END ${kind} SIGNATURE-----`,
+  ];
+}
+
+// A header whose value runs over continuation lines, as git writes mergetag and gpgsig.
+function folded(name: string, lines: string[]): string[] {
+  return [`${name} ${lines[0]}`, ...lines.slice(1).map((line) => ` ${line}`)];
+}
+
 function zipBytes(): Buffer {
   return Buffer.concat([Buffer.from([0x50, 0x4b, 0x03, 0x04]), Buffer.from('a packed body')]);
 }
@@ -595,6 +625,74 @@ describe('publish-scan full mode over the working tree and every object in histo
     expect(lines).toContain('user-name <user name> in worktree whoami.txt:2');
     expect(lines).toContain('home-path <home path> in worktree whoami.txt:3');
     expectNoLeak(result, hostname(), me.username, me.homedir);
+  });
+});
+
+describe('publish-scan commit and tag objects', () => {
+  it('scans every commit header, so a term in a mergetag blocks the push, and skips genuine armour', () => {
+    const box = makeBox();
+    makeRepo(box);
+    const remote = makeRemote(box);
+    const base = git(box, 'rev-parse', 'HEAD');
+    const tree = git(box, 'rev-parse', 'HEAD^{tree}');
+    const side = git(box, 'commit-tree', tree, '-p', base, '-m', 'side');
+    const who = 'Test Author <author@example.com> 1700000000 +0000';
+    const tag = [
+      `object ${side}`,
+      'type commit',
+      'tag v9',
+      `tagger ${who}`,
+      '',
+      `Notes for ${LONG}`,
+    ];
+    const merge = hashObject(
+      box,
+      'commit',
+      [
+        `tree ${tree}`,
+        `parent ${base}`,
+        `parent ${side}`,
+        `author ${who}`,
+        `committer ${who}`,
+        ...folded('mergetag', [...tag, ...armour()]),
+        ...folded('gpgsig', armour('SSH')),
+        '',
+        "Merge tag 'v9'",
+        '',
+      ].join('\n'),
+    );
+    git(box, 'update-ref', 'refs/heads/main', merge);
+    const result = scanRepo(box);
+    expect(result.code).toBe(1);
+    expect(findings(result)).toEqual([
+      `private-term <private term #1> in commit ${merge} mergetag -- IN HISTORY`,
+    ]);
+    expectNoLeak(result, LONG, SHORT);
+    const blocked = run('git', ['push', '-q', 'origin', 'main'], box.repo, box.env);
+    expect(blocked.code).not.toBe(0);
+    expect(`${blocked.stdout}${blocked.stderr}`).toContain(`commit ${merge} mergetag`);
+    expect(remoteRef(box, remote, 'main')).toBe('');
+    expectNoLeak(blocked, LONG, SHORT);
+  });
+
+  it('scans a tag message past a BEGIN line that does not start genuine armour, in full and --ci', () => {
+    const box = makeBox();
+    makeRepo(box);
+    const fake = ['Release', '', '-----BEGIN PGP SIGNATURE-----', `Notes for ${LONG}`];
+    git(box, 'tag', '-a', 'v2', '-m', [...fake, `token ${GITHUB_TOKEN}`].join('\n'));
+    git(box, 'tag', '-a', 'v3', '-m', ['Release 3', '', ...armour()].join('\n'));
+    const tag = git(box, 'rev-parse', 'v2');
+    const full = scanRepo(box);
+    expect(full.code).toBe(1);
+    expect(findings(full)).toEqual([
+      `private-term <private term #1> in tag ${tag} -- IN HISTORY`,
+      `secret <secret:github-token> in tag ${tag} -- IN HISTORY`,
+    ]);
+    expectNoLeak(full, LONG, SHORT, GITHUB_TOKEN);
+    const ci = scanRepo(box, '--ci');
+    expect(ci.code).toBe(1);
+    expect(findings(ci)).toEqual([`secret <secret:github-token> in tag ${tag} -- IN HISTORY`]);
+    expectNoLeak(ci, LONG, GITHUB_TOKEN);
   });
 });
 

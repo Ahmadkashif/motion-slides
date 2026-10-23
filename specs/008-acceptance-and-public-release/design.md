@@ -95,15 +95,28 @@ flowchart LR
       or `iTXt` chunks) is a finding unless its SHA-256 is in the user's allowed-binaries file. `--ci`
       mode does not apply this rule (CI has no user file and checks secrets only).
     - Tree entry names (paths) are scanned.
-    - Commits are scanned raw: author and committer names and emails, and the full message.
-    - Annotated tags are scanned raw: tagger and message.
+    - Commits and annotated tags are scanned raw: every header (for commits that includes `author`,
+      `committer`, `encoding`, `mergetag` and any header git does not write itself) and the full
+      message. A header's continuation lines are unfolded, so a `mergetag` (a whole tag object inside
+      a merge commit) is scanned too. Only text nobody wrote is left out:
+      - genuine signature armour: a `-----BEGIN PGP SIGNATURE-----` or `-----BEGIN SSH SIGNATURE-----`
+        line, its matching `-----END ... -----` line, and the lines between, when every one of those is
+        base64 (with `=` padding and the `=` CRC line), blank, or a `Version:` or `Comment:` armour
+        header. Random base64 would trip short terms. The armour headers are written text and are
+        still scanned. The same rule applies inside the continuation lines of `gpgsig` and `mergetag`
+        headers. A BEGIN line followed by anything else (ordinary text, a missing END) is ordinary text,
+        scanned with what follows it, so a fake signature line hides nothing. Known limit: text made
+        only of base64 characters inside a block of the genuine shape is not scanned.
+      - lines that are exactly `tree`, `parent` or `object` and an object id, whose hex digits would
+        trip short terms.
   - Ref names: `git for-each-ref --format=%(refname)` (branches, tags, remotes, stash).
 - **Secret rules** (all modes): GitHub tokens (`gh[pousr]_` + 36 or more, `github_pat_`), AWS access
   keys (`AKIA` + 16), PEM private keys, Slack tokens (`xox[abprs]-`), Google API keys (`AIza` + 35),
   OpenAI (`sk-`, `sk-proj-`), Anthropic (`sk-ant-`) and Hugging Face (`hf_`) keys.
 - **Output never contains a matched value.** One line per finding: rule id, location and fingerprint.
-  - Locations: `worktree <path>:<line>`, `blob <oid> <path>`, `commit <oid> author|committer|message`,
-    `tag <oid>`, `ref <name>`, `text <file>:<line>`. Before printing, every match inside a printed
+  - Locations: `worktree <path>:<line>`, `blob <oid> <path>`, `tree <oid> <path>`,
+    `commit <oid> <header>|message` (a header git does not write itself prints as `header`),
+    `tag <oid>`, `ref <name>`, `pushed-ref <name>`, `text <file>:<line>`. Before printing, every match inside a printed
     path or ref name is replaced by its label, so a term in a file or branch name is never echoed.
   - Labels: `<private term #n>` (list position), `<host name>`, `<user name>`, `<home path>`,
     `<ip address>`, `<secret:rule>`.
@@ -195,6 +208,9 @@ flowchart LR
   - a private term in a file, a path, a commit message, an author name, a branch name and an annotated
     tag message, each reported as `<private term #n>` with the term absent from the printed path or
     ref;
+  - a term in the `mergetag` header of a merge commit (built with `git hash-object`) blocks the push,
+    while genuine armour in its `gpgsig` and inside the merged tag is skipped; a tag message with a fake
+    BEGIN line followed by a term and a secret is flagged in full and in `--ci`;
   - the short-term table: `QRX_notes`, `QRXColors`, `myQRX`, `QRXs` and `Kim's` match, `Kimberly` does not
     (with planted stand-ins of the same shapes); a 5-character term matches inside `xTermx`;
   - an extra host fact in a file;
