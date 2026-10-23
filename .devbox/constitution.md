@@ -4,7 +4,7 @@ The non-negotiable engineering principles for this project. Specs, designs, plan
 checked against these articles. An exception is allowed only when it is written down in the feature's
 `design.md` (Constitution check table) with a reason and a simpler alternative that was rejected.
 
-Version 1.0.0 · Adopted 2026-10-21 · Amend by PR, bump the version, and log the change at the bottom.
+Version 1.1.0 · Adopted 2026-10-21 · Amended 2026-10-23 · Amend by PR, bump the version, and log the change at the bottom.
 
 ## Article I. Specification before code
 
@@ -62,11 +62,50 @@ Every change leaves code, tests and docs at least as healthy as it found them. L
 
 ## Project-specific articles
 
-<!-- Add articles that are true for this project only, e.g. "All money is integer minor units",
-"Offline first: every screen works without network", "Public API is frozen until v2". -->
+These come from the binding constraints in research-registery issue #17 and the user's privacy rules.
+
+### P1. Local voice only
+
+Narration uses Supertonic 3, voice M3, steps 32, speed 0.75, seed 1234, synthesised on the machine that
+renders. No cloud or API speech of any kind, not even free tiers (ElevenLabs, OpenAI, Azure, edge-tts,
+Hugging Face Spaces). No voice cloning. Never macOS `say` for anything shared: its voices are licensed
+for personal, non-commercial use only. Every video carries an "AI narration" disclosure.
+
+### P2. No model pulls without the user's yes
+
+The Supertonic weights, any speech-recognition model and any other model are downloaded only after the
+user's explicit yes, and only by the installer behind a consent flag. Product code never downloads
+weights. Never read, change, start or stop the user's Ollama.
+
+### P3. The brief is the source of truth
+
+Each video's idea file holds every caption, narration line, number and timing knob. A new video never
+needs engine code edits. Nothing is tuned to one host.
+
+### P4. Cut pauses, never content
+
+Over the length cap, shrink pauses and holds only. Never drop content and never change the voice speed.
+
+### P5. Brand-true and flat
+
+Use the brief's colours and fonts. Show logos only when supplied, otherwise text wordmarks. Flat,
+stylised SVG, never photoreal. Figures are gender-neutral unless the brief says otherwise.
+
+### P6. Company content never enters the repository
+
+Only made-up samples are committed. Real briefs, figures, private pronunciation maps, private banned-term
+lists and outputs live outside the repository and are passed by path. In anything committed, the three
+reference videos are named only R1, R2 and R3. The repository is public, so this holds for every push.
+
+### P7. Honest reporting
+
+Every check reports VERIFIED or NOT VERIFIED with its evidence. The gate fails the build; it never only
+warns. Where a step waits on the user, build everything around it, mark that step NOT RUN, and give the
+exact commands that finish it.
 
 ## Amendments
 
 | Version | Date | Change | Reason |
 |---------|------|--------|--------|
 | 1.0.0 | 2026-10-21 | Adopted DevBox defaults | Initial |
+| 1.1.0 | 2026-10-23 | Added project articles P1 to P7 | Binding constraints of research-registery issue #17 and the user's privacy rules |
