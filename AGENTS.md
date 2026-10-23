@@ -6,11 +6,22 @@ fix it in the same PR that discovered it.
 
 ## Project
 
-TODO(devbox): one paragraph. What this is, who uses it, and its current state (prototype, beta, production).
+motion-slides turns a Markdown storyboard brief into a narrated, captioned explainer MP4, entirely on
+the local machine. A brief compiles into an idea file (the single source of truth) and a scene built from
+a library of flat, brand-themed components; one paused animation timeline is captured frame by frame and
+encoded; narration comes from a local voice (Supertonic 3, voice M3); and a verify gate checks every
+video against a fixed bar before delivery. It is for people who would rather send a short video than a
+document, driven from one CLI, `motion-slides` (`new`, `voice`, `stills`, `render`, `verify`, `deliver`,
+`doctor`). Current state: specification only. Eight feature specs are drafted in `specs/` (roadmap and
+requirement coverage in `docs/architecture.md`), and there is no code yet. The repository is public, so
+constitution article P6 (no company content) applies to every push.
 
 - Shape: `cli` (playbooks in `.devbox/playbooks/shapes/`)
 - Stack: `node` (toolchain defaults in `.devbox/playbooks/languages.md`)
-- TODO(devbox): repo map. Three to eight lines, one per top-level directory that matters.
+- `specs/`: one folder per feature, 001 to 008 in build order (spec first, then design and tasks).
+- `docs/`: architecture, roadmap, requirement coverage and glossary; decisions in `docs/adr/`.
+- `.devbox/`: DevBox config, constitution (project articles P1 to P7), playbooks and templates.
+- `.github/`: CI workflow, issue and PR templates, Dependabot.
 
 ## Commands
 
