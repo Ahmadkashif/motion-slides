@@ -29,7 +29,7 @@ Decisions: 8 open choices logged as "Proposed" in the Decisions log, pending gri
 the user reviews with git diff and commits.
 Next: /devbox:grill (confirm or override the proposed decisions in the Decisions log).
 
-## 2026-10-23 22:30  critique  design and tasks (Stage 0 and Stage 1)
+## 2026-10-23 21:30  critique  design and tasks (Stage 0 and Stage 1)
 
 Did: devbox:linus reviewed the 001 design and tasks and the 008 publish-scan design (Slice 1) in four passes.
 Passes 1 to 3 returned THROW AWAY; every finding was fixed in the docs. Pass 4 returned GO with one fail-closed

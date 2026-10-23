@@ -29,7 +29,7 @@ Decisions: 2 open choices logged as "Proposed" in the Decisions log, pending gri
 the user reviews with git diff and commits.
 Next: /devbox:grill (resolve the clarification on the R1 to R3 briefs, then the proposed decisions).
 
-## 2026-10-23 22:30  critique  design and tasks (Stage 0 and Stage 1)
+## 2026-10-23 21:30  critique  design and tasks (Stage 0 and Stage 1)
 
 Did: devbox:linus reviewed the 001 design and tasks and the 008 publish-scan design (Slice 1) in four passes.
 Passes 1 to 3 returned THROW AWAY; every finding was fixed in the docs. Pass 4 returned GO with one fail-closed
@@ -87,7 +87,7 @@ the push. Scanning the `<remote ref>` field from the hook's standard input would
 design change (a new CLI argument).
 Next: the Stage 0 gate (001 T013).
 
-## 2026-10-24 00:20  build  T001 follow-up: pushed ref names
+## 2026-10-23 23:05  build  T001 follow-up: pushed ref names
 
 Did: closed the gap the T001 worker logged: the hook now passes each pushed remote ref name as `--push-ref`,
 and the scanner checks it before the push makes it public (location `pushed-ref`, never baselined).
