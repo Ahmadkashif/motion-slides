@@ -673,8 +673,8 @@ async function finish(ctx) {
 }
 
 /**
- * The private terms list: one term per line, `#` starts a comment. Missing, unreadable or empty is
- * "cannot scan".
+ * The private terms list: one term per line; a line whose first character after optional spaces is `#` is
+ * a comment, and a `#` anywhere else is part of the term. Missing, unreadable or empty is "cannot scan".
  * @param {string} home
  * @returns {Promise<string[]>}
  */
@@ -693,8 +693,9 @@ async function readTerms(home) {
   /** @type {string[]} */
   const terms = [];
   for (const line of content.split(/\r?\n/)) {
-    const term = line.replace(/#.*/, '').trim();
-    if (term !== '' && !terms.some((t) => t.toLowerCase() === term.toLowerCase())) terms.push(term);
+    const term = line.trim();
+    if (term === '' || term.startsWith('#')) continue;
+    if (!terms.some((t) => t.toLowerCase() === term.toLowerCase())) terms.push(term);
   }
   if (terms.length === 0) throw new CannotScan(`the private terms list ${LIST} has no terms`);
   return terms;

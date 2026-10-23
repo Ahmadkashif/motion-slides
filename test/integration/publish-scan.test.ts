@@ -312,13 +312,25 @@ describe('publish-scan private terms list', () => {
     expectNoLeak(result, box.home);
   });
 
-  it('ignores comments after a term and counts positions over terms only', () => {
+  it('skips comment lines, indented or not, and counts positions over terms only', () => {
     const box = makeBox([]);
-    writeList(box.home, 'private-terms.txt', `# header\n${LONG}  # a stand-in\n\n${SHORT}`);
+    writeList(box.home, 'private-terms.txt', `# header\n${LONG}\n   # a stand-in\n\n${SHORT}`);
     const result = scanText(box, `${SHORT} notes\n`);
     expect(result.code).toBe(1);
     expect(result.stdout).toContain('private-term <private term #2> in text');
     expectNoLeak(result, LONG, SHORT);
+  });
+
+  it('keeps a # inside a term, because # starts a comment only at the start of a line', () => {
+    const box = makeBox([]);
+    const hashed = cat('Qx', '#', 'Lab');
+    writeList(box.home, 'private-terms.txt', `${LONG}\n${hashed}`);
+    const result = scanText(box, `Notes on ${hashed}\nand ${hashed.slice(0, 2)} alone\n`);
+    expect(result.code).toBe(1);
+    expect(findings(result)).toEqual([
+      expect.stringMatching(/^private-term <private term #2> in text \S+body\.md:1$/),
+    ]);
+    expectNoLeak(result, LONG, hashed);
   });
 });
 

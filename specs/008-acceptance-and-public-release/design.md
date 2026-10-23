@@ -46,7 +46,9 @@ flowchart LR
   - Private terms: `$HOME/.config/motion-slides/private-terms.txt`. No product variable points the scan
     at a different list. `HOME` does decide the folder, and tests use that to plant a list in a
     temporary folder; running a real push with a different `HOME` on purpose is a deliberate bypass of
-    the same kind as `--no-verify`, which AGENTS.md already bans. One term per line, `#` starts a comment. Matching is case-insensitive:
+    the same kind as `--no-verify`, which AGENTS.md already bans. One term per line. A line whose first
+    character after optional spaces is `#` is a comment; a `#` anywhere else is part of the term, so a
+    term may contain `#`. Matching is case-insensitive:
     - terms of 5 or more characters match as substrings (they catch `AcmeBrief.md`, `acme_q3.json`
       and `acmeColors`);
     - shorter terms match unless the character before is a letter or the character after is a
