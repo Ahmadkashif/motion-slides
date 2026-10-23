@@ -28,3 +28,16 @@ Evidence: specs only, no code. Every issue requirement is mapped to an AC in doc
 Decisions: 2 open choices logged as "Proposed" in the Decisions log, pending grill. Not committed;
 the user reviews with git diff and commits.
 Next: /devbox:grill (resolve the clarification on the R1 to R3 briefs, then the proposed decisions).
+
+## 2026-10-23 22:30  critique  design and tasks (Stage 0 and Stage 1)
+
+Did: devbox:linus reviewed the 001 design and tasks and the 008 publish-scan design (Slice 1) in four passes.
+Passes 1 to 3 returned THROW AWAY; every finding was fixed in the docs. Pass 4 returned GO with one fail-closed
+MAJOR (the bundled font tripping a short-term rule) and minors, all folded in before approval.
+Evidence: verdicts held in the session; key fixes are in design.md (no build step, header CSP, exact-match file
+map, FontFace weight range, immediateRender false, BT.709 tags, frame count, run folder; scan fails closed,
+user-owned baseline and allowed binaries, hook in the git common dir, pushed ids scanned, --text mode).
+Decisions: two 001 spec amendments (lead and gap at least 0.12 s; previews under out/preview/) decided under the
+build plan's delegation, flagged for the user at the PR. 008 approval covers Slice 1 (publish scan) only;
+the release slice is designed in Stage 8.
+Next: build 001 T001, then 008 T001, then the Stage 0 gate (001 T013).

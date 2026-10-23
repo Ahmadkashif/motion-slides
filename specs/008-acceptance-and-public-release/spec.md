@@ -53,11 +53,10 @@ Not part of acceptance (decided by the user on 2026-10-23): the briefs are not o
 criterion 8 rests on the made-up sample (US2). The criteria below apply only WHERE a brief is supplied
 later, and run locally only.
 
-- AC1.1 Given the R1 brief (8 scenes, about 112 s), when it goes through `new --through`, then the gate
+- AC1.1 Given the R1 brief, when it goes through `new --through`, then the gate
   passes every automated check.
-- AC1.2 Given the R2 brief (10 scenes, 176.9 s, with a running dollar counter and a static calculator
-  panel), when it goes through `new --through`, then the gate passes every automated check.
-- AC1.3 Given the R3 brief (103 s, with a before/after calculator), when it goes through `new --through`,
+- AC1.2 Given the R2 brief, when it goes through `new --through`, then the gate passes every automated check.
+- AC1.3 Given the R3 brief, when it goes through `new --through`,
   then the gate passes every automated check.
 - AC1.4 THE SYSTEM SHALL reproduce each video with zero changes to product code and zero hand edits to
   the generated idea or scene page, and record each reproduction's duration next to the original's.

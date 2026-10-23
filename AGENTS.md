@@ -105,4 +105,4 @@ house style rather than describing it.
 One line each, newest last. Add a line whenever an agent or a human gets bitten by something
 this file could have prevented.
 
--
+- Examples in docs and tests (matching rules, fixtures) use made-up stand-ins, never an entry from the private terms list.

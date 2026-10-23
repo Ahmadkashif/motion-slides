@@ -194,7 +194,7 @@ it. Feature numbers are the `specs/` folders; AC IDs are the spec's IDs.
 | batch helper: loads the model once, seeds each line | 002 | AC3.1, AC3.2 |
 | caption-qa: every frame, never two captions, no lingering half-faded caption | 003 | AC5.1, AC5.2 |
 | verify-final: streams, loudness, silences, caption cues against speech onsets | 003 | AC1.1, AC2.1, AC3.1, AC4.2 |
-| netcache: cached network requests, local woff2 fonts | 001 | AC8.1, AC8.2 |
+| netcache: cached network requests, local fonts (bundled Inter TTF) | 001 | AC8.1, AC8.2 |
 | build-artifact: Artifact page with live scene player and MP4 | 006 | AC6.1 |
 | Requirements: node, Playwright, Chrome, ffmpeg, Supertonic uv tool; cairo and pkg-config only for Manim | 007 | AC1.1, AC6.2 |
 
