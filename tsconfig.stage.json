@@ -1,0 +1,20 @@
+{
+  // The browser stage (src/stage): plain JavaScript ES modules with JSDoc types, served to Chrome as-is.
+  "compilerOptions": {
+    "target": "es2024",
+    "lib": ["es2024", "dom", "dom.iterable"],
+    "module": "nodenext",
+    "moduleResolution": "nodenext",
+    "types": [],
+    "strict": true,
+    "noEmit": true,
+    "allowJs": true,
+    "checkJs": true,
+    "skipLibCheck": true,
+    // The stage imports GSAP by the absolute URL the renderer serves; map it to the package's types.
+    "paths": {
+      "/vendor/gsap/index.js": ["./src/stage/types/gsap.d.ts"]
+    }
+  },
+  "include": ["src/stage/**/*.js", "src/stage/**/*.d.ts"]
+}

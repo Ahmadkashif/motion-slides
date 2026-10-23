@@ -1,9 +1,9 @@
 ---
 feature: 002-local-narration-and-audio
 title: "Local narration and audio"
-status: draft   # draft | approved | shipped
+status: approved   # draft | approved | shipped
 lane: feature   # patch | feature | product
-appetite: 1 week   # proposed; the user sets the final appetite in grill
+appetite: 1 week   # accepted by the user on 2026-10-23
 created: 2026-10-23
 ---
 
@@ -274,16 +274,16 @@ Out of scope (explicit non-goals, so nobody builds them):
 
 - Q: Which voice and settings? -> A: Supertonic 3, M3, steps 32, speed 0.75, seed 1234, batch mode
   (binding constraint from the user).
-- Q: Can the idea change the voice settings? -> Proposed: no; the fields exist for clarity but must
-  hold the binding values, and changing them needs a constitution amendment (P1). Pending /devbox:grill.
-- Q: How is the pronunciation check done? -> Proposed: an A/B listening pack for a human, with no
+- Q: Can the idea change the voice settings? -> A: no; the fields exist for clarity but must
+  hold the binding values, and changing them needs a constitution amendment (P1). (Accepted by the user on 2026-10-23 with the build plan.)
+- Q: How is the pronunciation check done? -> A: an A/B listening pack for a human, with no
   automatic judgement (an acoustic-distance score was considered and deferred; any recogniser would
-  need a model download). Pending /devbox:grill.
-- Q: Are numbers converted automatically? -> Proposed: yes, deterministic number-to-words for plain
+  need a model download). (Accepted by the user on 2026-10-23 with the build plan.)
+- Q: Are numbers converted automatically? -> A: yes, deterministic number-to-words for plain
   numbers, currency and percentages when a beat has no override; anything ambiguous fails and asks for
-  an override. Pending /devbox:grill.
-- Q: Do manual checks block delivery? -> Proposed: no; they report NOT VERIFIED until a human records a
-  verdict, and deliver prints them (see 006). Pending /devbox:grill.
+  an override. (Accepted by the user on 2026-10-23 with the build plan.)
+- Q: Do manual checks block delivery? -> A: no; they report NOT VERIFIED until a human records a
+  verdict, and deliver prints them (see 006). (Accepted by the user on 2026-10-23 with the build plan.)
 - Q: Where do company pronunciations live? -> A: in private per-project map files outside the
   repository, passed by path (user's privacy rule).
-- Q: Loudness tolerance? -> Proposed: 0.5 LU around -16 LUFS. Pending /devbox:grill.
+- Q: Loudness tolerance? -> A: 0.5 LU around -16 LUFS. (Accepted by the user on 2026-10-23 with the build plan.)

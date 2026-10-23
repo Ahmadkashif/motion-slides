@@ -104,10 +104,10 @@ must add" items of research-registery issue #17.
 | 005 | Storyboard brief compiler | Documented brief format and template, deterministic brief-to-idea-and-scene compiler with line-numbered errors, in-repository guard. | 1, 2 | 001, 004 |
 | 006 | Production workflow CLI | `motion-slides new, voice, stills, render, verify, deliver, doctor`, straight-through runs, optional sign-off, per-scene re-render, delivery with checksums, Artifact page folder. | 1, 5, 6 (process steps 1 to 8) | 001 to 005 |
 | 007 | Install and hardware profiles | User-space idempotent installer, consent-gated weights, Mac and Linux profiles with minimums, doctor and smoke test. | 7 | 006 (doctor command) |
-| 008 | Acceptance and public release | R1 to R3 reproduced locally, the made-up public sample, README, evidence, MIT licence, notices, pre-push scans, release and registry closure. | 8, registry commitment | 001 to 007 |
+| 008 | Acceptance and public release | R1 to R3 reproduced locally (optional), the made-up public sample, README, evidence, MIT licence, notices, pre-push scans, release and registry closure. | 8, registry commitment | 001 to 007 |
 
-Open question: one clarification marker remains, in 008 US1 (whether the R1 to R3 briefs will be
-supplied). Every other open choice is logged as "Proposed" in its spec's Decisions log for grilling.
+No open questions remain. On 2026-10-23 the user accepted every proposed decision with the build plan
+and made reproducing R1 to R3 optional (008 US1), so acceptance rests on the made-up sample.
 
 ## 12. Requirement coverage
 
@@ -118,7 +118,7 @@ it. Feature numbers are the `specs/` folders; AC IDs are the spec's IDs.
 
 | Requirement | Feature | AC |
 |-------------|---------|----|
-| Source still on the Mac, pending transfer | 008 | US1 clarification marker; AC1.1, AC1.2, AC1.3 depend on it; AC7.1 (source is reference only) |
+| Source still on the Mac, pending transfer | 008 | US1 (optional since 2026-10-23); AC1.1, AC1.2, AC1.3 apply only if the briefs arrive; AC7.1 (source is reference only) |
 | Untested host: check the real hardware, assume no GPU | 007 | AC3.2, AC3.4 (decision: no NVIDIA GPU on the box) |
 | Company content stays private; reproduce R1 to R3 locally; publish only the made-up sample | 008, 005 | 008 AC1.5, AC2.1, AC5.4; 005 AC7.2, AC7.3 |
 | No model pulls without the user's explicit yes (weights, any ASR model) | 002, 007 | 002 AC2.1, AC2.2; 007 AC2.1, AC2.4 |
@@ -194,7 +194,7 @@ it. Feature numbers are the `specs/` folders; AC IDs are the spec's IDs.
 | batch helper: loads the model once, seeds each line | 002 | AC3.1, AC3.2 |
 | caption-qa: every frame, never two captions, no lingering half-faded caption | 003 | AC5.1, AC5.2 |
 | verify-final: streams, loudness, silences, caption cues against speech onsets | 003 | AC1.1, AC2.1, AC3.1, AC4.2 |
-| netcache: cached network requests, local woff2 fonts | 001 | AC8.1, AC8.2 |
+| netcache: cached network requests, local fonts (bundled Inter TTF) | 001 | AC8.1, AC8.2 |
 | build-artifact: Artifact page with live scene player and MP4 | 006 | AC6.1 |
 | Requirements: node, Playwright, Chrome, ffmpeg, Supertonic uv tool; cairo and pkg-config only for Manim | 007 | AC1.1, AC6.2 |
 

@@ -1,0 +1,2 @@
+error: unknown command 'frobnicate'
+(add --help for usage)

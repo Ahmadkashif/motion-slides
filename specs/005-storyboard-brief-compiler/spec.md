@@ -1,9 +1,9 @@
 ---
 feature: 005-storyboard-brief-compiler
 title: "Storyboard brief compiler"
-status: draft   # draft | approved | shipped
+status: approved   # draft | approved | shipped
 lane: feature   # patch | feature | product
-appetite: 4 days   # proposed; the user sets the final appetite in grill
+appetite: 4 days   # accepted by the user on 2026-10-23
 created: 2026-10-23
 ---
 
@@ -194,12 +194,10 @@ Out of scope (explicit non-goals, so nobody builds them):
 
 ## Decisions log
 
-- Q: Should the compiler use a model to interpret free-form storyboards? -> Proposed: no; a deterministic
-  compiler over a documented format (same brief gives the same output, free to run, testable). Pending
-  /devbox:grill.
-- Q: Default timing knobs when the brief sets none? -> Proposed: opener 2.0 s, lead 0.80 s, gap 0.25 s
-  (0.40 s dense), tail 4.0 s. Pending /devbox:grill.
-- Q: What if the user edited the generated files? -> Proposed: refuse to overwrite unless forced.
-  Pending /devbox:grill.
-- Q: Guard against compiling company briefs into the repo? -> Proposed: refuse unless the brief is
-  flagged as a made-up sample. Pending /devbox:grill.
+- Q: Should the compiler use a model to interpret free-form storyboards? -> A: no; a deterministic
+  compiler over a documented format (same brief gives the same output, free to run, testable). (Accepted by the user on 2026-10-23 with the build plan.)
+- Q: Default timing knobs when the brief sets none? -> A: opener 2.0 s, lead 0.80 s, gap 0.25 s
+  (0.40 s dense), tail 4.0 s. (Accepted by the user on 2026-10-23 with the build plan.)
+- Q: What if the user edited the generated files? -> A: refuse to overwrite unless forced. (Accepted by the user on 2026-10-23 with the build plan.)
+- Q: Guard against compiling company briefs into the repo? -> A: refuse unless the brief is
+  flagged as a made-up sample. (Accepted by the user on 2026-10-23 with the build plan.)

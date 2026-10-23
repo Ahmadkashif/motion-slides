@@ -1,9 +1,9 @@
 ---
 feature: 007-install-and-hardware-profiles
 title: "Install and hardware profiles"
-status: draft   # draft | approved | shipped
+status: approved   # draft | approved | shipped
 lane: feature   # patch | feature | product
-appetite: 3 days   # proposed; the user sets the final appetite in grill
+appetite: 3 days   # accepted by the user on 2026-10-23
 created: 2026-10-23
 ---
 
@@ -192,11 +192,9 @@ Out of scope (explicit non-goals, so nobody builds them):
 
 - Q: Does the Linux box have the "RTX 4000" the handoff assumed? -> A: No; integrated Intel graphics
   only, so every profile is CPU-only (verified on the box).
-- Q: Minimum specs for the Linux profile? -> Proposed: x86_64, 4 cores, 8 GB RAM, 10 GB free disk.
-  Pending /devbox:grill.
-- Q: Which Chrome? -> Proposed: a pinned headless Chrome installed by the browser automation tool, so
-  renders do not change when the system Chrome updates. Pending /devbox:grill.
-- Q: Is Node installed by the installer? -> Proposed: no; Node 24 or newer is a stated prerequisite.
-  Pending /devbox:grill.
-- Q: A smoke test in doctor? -> Proposed: yes, `doctor --smoke`, a 5 s silent preview that measures the
-  host. Pending /devbox:grill.
+- Q: Minimum specs for the Linux profile? -> A: x86_64, 4 cores, 8 GB RAM, 10 GB free disk. (Accepted by the user on 2026-10-23 with the build plan.)
+- Q: Which Chrome? -> A: a pinned headless Chrome installed by the browser automation tool, so
+  renders do not change when the system Chrome updates. (Accepted by the user on 2026-10-23 with the build plan.)
+- Q: Is Node installed by the installer? -> A: no; Node 24 or newer is a stated prerequisite. (Accepted by the user on 2026-10-23 with the build plan.)
+- Q: A smoke test in doctor? -> A: yes, `doctor --smoke`, a 5 s silent preview that measures the
+  host. (Accepted by the user on 2026-10-23 with the build plan.)

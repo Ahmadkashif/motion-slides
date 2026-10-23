@@ -31,18 +31,17 @@ Rules:
 - The last task before shipping is usually HITL: a human reviews docs, release notes and rollout.
 -->
 
-## Slice 1: walking skeleton
+## Slice 1: brief to idea (build-plan Stage 5)
 
-<!-- tasks go here -->
+- [ ] T001 [AFK] Brief parser and compiler to idea.json and the fixed scene.html shell, verbatim text, figure references, line-numbered errors, determinism, `motion-slides new <brief>` compile step (US2: AC2.1, AC2.2, AC2.3, AC2.4, AC2.5; US3: AC3.1, AC3.2, AC3.3; US4: AC4.1, AC4.2, AC4.3; US5: AC5.1, AC5.2, AC5.3, AC5.4, AC5.5) after: none
+      Verify: golden compile, broken-brief table, tricky-text set, compile-twice hash equality
 
-## Slice 2: <story or capability>
+## Slice 2: format docs, template, sample, guards
 
-<!-- tasks go here -->
-
-## Hardening
-
-<!-- edge cases and failure modes from spec.md, NFR checks -->
+- [ ] T002 [AFK] Brief format doc, blank template, the made-up sample brief, safe re-compile and repository guard (US1: AC1.1, AC1.2, AC1.3; US6: AC6.1, AC6.2; US7: AC7.1, AC7.2, AC7.3) after: T001
+      Verify: sample compiles with zero errors and renders a preview; edited idea.json blocks re-compile without --force; non-sample brief into the repo refused
 
 ## Ship
 
-<!-- docs, CHANGELOG, rollout and rollback plan; usually one HITL task -->
+- [ ] T003 [HITL] User reads the sample brief and merges the PR after: T002
+      Verify: PR approved by Ahmadkashif and merged by the user

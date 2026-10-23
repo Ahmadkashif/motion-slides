@@ -1,0 +1,22 @@
+{
+  // Node sources and tests. Node 24 runs the .ts files directly (type stripping); tsc only checks.
+  "compilerOptions": {
+    "target": "es2024",
+    "lib": ["es2024"],
+    "module": "nodenext",
+    "moduleResolution": "nodenext",
+    "types": ["node"],
+    "strict": true,
+    "noEmit": true,
+    "erasableSyntaxOnly": true,
+    "allowImportingTsExtensions": true,
+    "verbatimModuleSyntax": true,
+    "resolveJsonModule": true,
+    "allowJs": true,
+    "checkJs": true,
+    "skipLibCheck": true
+  },
+  "include": ["bin/**/*.js", "scripts/**/*.mjs", "src/**/*.ts", "test/**/*.ts"],
+  // The browser stage has its own project (tsconfig.stage.json).
+  "exclude": ["src/stage"]
+}

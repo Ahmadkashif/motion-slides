@@ -1,9 +1,9 @@
 ---
 feature: 001-render-engine-idea-to-mp4
 title: "Render engine: idea to MP4"
-status: draft   # draft | approved | shipped
+status: approved   # draft | approved | shipped
 lane: feature   # patch | feature | product
-appetite: 1 week   # proposed; the user sets the final appetite in grill
+appetite: 1 week   # accepted by the user on 2026-10-23
 created: 2026-10-23
 ---
 
@@ -59,11 +59,11 @@ reads every field; features 002 to 006 own the meaning of the fields marked with
 | `voice.supertonic.pronunciation` | Per-project map from written word to spoken respelling. | Object of strings (002). |
 | `voice.trim.threshold_db`, `.keep_start`, `.keep_end` | Silence trimming of each clip. | Defaults `-50`, `0.02`, `0.06` (002). |
 | `audio.target_lufs`, `.true_peak_db`, `.pad_volume` | Loudness target, peak ceiling, pad level. | Defaults `-16`, `-1.5`, `0.05` (002). |
-| `timing.opener`, `.lead`, `.gap`, `.tail` | Pauses in seconds (see Glossary in `docs/architecture.md`). | Non-negative numbers. |
+| `timing.opener`, `.lead`, `.gap`, `.tail` | Pauses in seconds (see Glossary in `docs/architecture.md`). | Non-negative numbers; `lead` and `gap` at least 0.12 s. |
 | `timing.cap` (added) | Maximum video length in seconds. | Required positive number. |
-| `timing.floors` (added) | Minimum each pause or hold may shrink to under the cap. | Optional; defaults in AC6.5. |
+| `timing.floors` (added) | Minimum each pause or hold may shrink to under the cap. | Optional; defaults in AC6.5; `lead` and `gap` floors at least 0.12 s. |
 | `scenes[]` | Ordered scenes; each has an id, its components (004) and beats. | At least one scene. |
-| `scenes[].gap`, `scenes[].dense` (added) | Per-scene gap override; dense-scene flag (004). | Optional. |
+| `scenes[].gap`, `scenes[].dense` (added) | Per-scene gap override; dense-scene flag (004). | Optional; a gap override is at least 0.12 s. |
 | `scenes[].beats[]` | One beat = one caption = one clip. | At least one beat per scene. |
 | `beats[].caption` | The on-screen caption, real spelling, one line. | Non-empty string. |
 | `beats[].speak_supertonic`, `beats[].speak` | Override of the spoken text, so the caption keeps the real spelling while the voice reads a respelling (002). | Optional strings. |
@@ -136,7 +136,9 @@ As a requester, I want every MP4 in one known format, so that it plays everywher
 - AC4.2 THE SYSTEM SHALL write the audio stream as AAC-LC, 48 kHz, 2 channels.
 - AC4.3 THE SYSTEM SHALL lay out each video folder as `out/` (the MP4, `poster.jpg`, `captions.srt`,
   `captions.vtt`, `schedule.json`, `render.log`, `stills/`) and `build/` (stems, `tts-cache/`,
-  `voice-manifest.json`), creating missing folders and never writing outside the video folder.
+  `voice-manifest.json`), creating missing folders and never writing outside the video folder. WHERE
+  the render is a preview THE SYSTEM SHALL write its MP4, poster, schedule and log under
+  `out/preview/` instead, never replacing a file of the narrated set.
 - AC4.4 THE SYSTEM SHALL write `poster.jpg` as a 1920x1080 JPEG of the frame at the end of the opener
   (title card fully shown).
 
@@ -164,8 +166,8 @@ As a requester, I want an over-length video brought under the cap by trimming pa
 line is lost and the voice never speeds up.
 
 - AC6.1 IF the natural duration exceeds `timing.cap` THEN THE SYSTEM SHALL shrink every opener, lead,
-  gap, hold and tail by one common factor, none below its floor, until the duration is at or under the
-  cap.
+  gap, hold and tail by one common factor, none below its floor and none made longer than it was (a
+  pause already at or below its floor stays as it is), until the duration is at or under the cap.
 - AC6.2 WHILE shrinking THE SYSTEM SHALL keep every beat, every caption's text and every clip's audio
   and length exactly as measured (voice speed and content never change).
 - AC6.3 IF the duration with every pause at its floor still exceeds the cap THEN THE SYSTEM SHALL fail
@@ -175,7 +177,9 @@ line is lost and the voice never speeds up.
   durations in `schedule.json` and `render.log`.
 - AC6.5 WHERE the idea sets no floors THE SYSTEM SHALL use opener 1.0 s, lead 0.30 s, gap 0.20 s,
   hold 0 s and tail 3.0 s (or the disclaimer's reading time from 004 AC3.3 if longer), and SHALL never
-  shrink the gap of a dense scene below 0.40 s or the tail below 3.0 s, whatever the idea sets.
+  shrink the gap of a dense scene below 0.40 s or the tail below 3.0 s, whatever the idea sets. IF the
+  idea sets a lead or gap floor below 0.12 s THEN THE SYSTEM SHALL reject the idea, because the previous
+  caption's 0.12 s fade-out must end before the next caption starts (AC5.2).
 
 ### US7 (P2): Layout stills at key moments
 
@@ -296,24 +300,28 @@ Out of scope (explicit non-goals, so nobody builds them):
   its example command).
 - Q: Is the idea contract the issue's list? -> A: Yes, exactly, with the additions marked "added" above
   (user's breakdown).
-- Q: Preview without voice? -> Proposed: a silent preview timed at 155 words per minute (the middle of
+- Q: Preview without voice? -> A: a silent preview timed at 155 words per minute (the middle of
   the measured 151 to 159), watermarked, refused by deliver (lets 001 ship and be reviewed before the
-  weights download is approved). Pending /devbox:grill.
-- Q: What do opener, lead, gap and tail mean exactly? -> Proposed: as in AC3.1 (opener before the first
+  weights download is approved). (Accepted by the user on 2026-10-23 with the build plan.)
+- Q: What do opener, lead, gap and tail mean exactly? -> A: as in AC3.1 (opener before the first
   beat, lead before each later scene's first beat, gap between beats in a scene, tail after the last
-  beat) plus a per-beat hold. Pending /devbox:grill.
-- Q: How is the cap met? -> Proposed: one common shrink factor over all pauses and holds, floored by
-  `timing.floors` with the defaults in AC6.5 (keeps the rhythm; never touches content or speed, per P4).
-  Pending /devbox:grill.
-- Q: Unknown fields in idea.json? -> Proposed: rejected (catches typos that would otherwise silently do
-  nothing). Pending /devbox:grill.
-- Q: Network during render? -> Proposed: block every non-local request and fail, instead of the
-  hand-run pipeline's request cache (stronger guarantee, same goal: repeatable offline renders).
-  Pending /devbox:grill.
-- Q: Which frame is the poster? -> Proposed: the end of the opener, title card fully shown. Pending
-  /devbox:grill.
-- Q: Caption too long for one line? -> Proposed: fail and name the beat; the brief splits the line
-  (one line on screen is a lesson learned; auto-shrinking would break the brand type scale). Pending
-  /devbox:grill.
-- Q: Still addressing? -> Proposed: 1-based scene and beat numbers, `<scene>-<beat>+<sec>` as in the
-  issue. Pending /devbox:grill.
+  beat) plus a per-beat hold. (Accepted by the user on 2026-10-23 with the build plan.)
+- Q: How is the cap met? -> A: one common shrink factor over all pauses and holds, floored by
+  `timing.floors` with the defaults in AC6.5 (keeps the rhythm; never touches content or speed, per P4). (Accepted by the user on 2026-10-23 with the build plan.)
+- Q: Unknown fields in idea.json? -> A: rejected (catches typos that would otherwise silently do
+  nothing). (Accepted by the user on 2026-10-23 with the build plan.)
+- Q: Network during render? -> A: block every non-local request and fail, instead of the
+  hand-run pipeline's request cache (stronger guarantee, same goal: repeatable offline renders). (Accepted by the user on 2026-10-23 with the build plan.)
+- Q: Which frame is the poster? -> A: the end of the opener, title card fully shown. (Accepted by the user on 2026-10-23 with the build plan.)
+- Q: Caption too long for one line? -> A: fail and name the beat; the brief splits the line
+  (one line on screen is a lesson learned; auto-shrinking would break the brand type scale). (Accepted by the user on 2026-10-23 with the build plan.)
+- Q: Still addressing? -> A: 1-based scene and beat numbers, `<scene>-<beat>+<sec>` as in the
+  issue. (Accepted by the user on 2026-10-23 with the build plan.)
+- Q: Can lead and gap go below 0.12 s, under the cap or in the idea? -> A: No. The 0.12 s fade-out
+  must finish before the next caption fades in, or two captions share a frame (AC5.2); a pause already
+  below its floor is never lengthened by shrinking. (Decided by Claude on 2026-10-23 after the Stage 1
+  design critique, under the build plan's delegation; the user can reverse it at the Stage 1 PR.)
+- Q: Where does a preview write its files? -> A: under `out/preview/`, so a preview after a narrated
+  render can never replace the narrated poster, schedule or log that delivery ships. (Decided by Claude
+  on 2026-10-23 after the Stage 1 design critique, under the build plan's delegation; the user can
+  reverse it at the Stage 1 PR.)

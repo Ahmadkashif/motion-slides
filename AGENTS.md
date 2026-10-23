@@ -12,8 +12,9 @@ a library of flat, brand-themed components; one paused animation timeline is cap
 encoded; narration comes from a local voice (Supertonic 3, voice M3); and a verify gate checks every
 video against a fixed bar before delivery. It is for people who would rather send a short video than a
 document, driven from one CLI, `motion-slides` (`new`, `voice`, `stills`, `render`, `verify`, `deliver`,
-`doctor`). Current state: specification only. Eight feature specs are drafted in `specs/` (roadmap and
-requirement coverage in `docs/architecture.md`), and there is no code yet. The repository is public, so
+`doctor`). Current state: walking skeleton. The `motion-slides` CLI answers `--help` and `--version`, and
+the verify gates and CI are in place (001 T001); no command renders yet. Eight feature specs are in
+`specs/` (roadmap and requirement coverage in `docs/architecture.md`). The repository is public, so
 constitution article P6 (no company content) applies to every push.
 
 - Shape: `cli` (playbooks in `.devbox/playbooks/shapes/`)
@@ -25,17 +26,23 @@ constitution article P6 (no company content) applies to every push.
 
 ## Commands
 
-TODO(devbox): fill in exact commands with versions where it matters.
+Node 24.15 (`.nvmrc`; `engines` allows `>=24.15 <25`) and npm. There is no build step: Node runs the
+TypeScript in `src/` directly and `tsc` only type-checks (ADR 0002).
 
-- Setup: `TODO`
-- Run locally: `TODO`
+- Setup: `npm ci` (its `prepare` step installs the pre-push publish-safety scan into the git common dir).
+  Rendering also needs the Chrome headless shell and its system libraries
+  (`npx --no-install playwright-core install --with-deps --only-shell chromium`, as CI does) and
+  `ffmpeg` on the PATH.
+- Run locally: `node bin/motion-slides.js --help`, or `npm link` once to put `motion-slides` on the PATH.
+  Always run from this git clone: Node will not strip types from files under `node_modules`.
 - Verify, before every commit and before claiming anything is done: `devbox verify`
   (or `.devbox/bin/devbox verify` when DevBox is not installed), which runs
-- `npm run --if-present format:check`
-- `npm run --if-present lint`
-- `npm run --if-present typecheck`
-- `npm test`
-- `npm run --if-present build`
+- `npm run --if-present format:check` (Biome; fix with `npx biome format --write .`)
+- `npm run --if-present lint` (Biome rules and import order; warnings fail)
+- `npm run --if-present typecheck` (`tsc --noEmit` on `tsconfig.json` for Node code and on
+  `tsconfig.stage.json` for the browser stage in `src/stage/`)
+- `npm test` (vitest; one folder or file: `npm test -- test/golden`)
+- `npm run --if-present build` (skipped: there is no build script)
 
 ## How work flows here
 
@@ -57,12 +64,19 @@ Always:
 - Keep changes small and on one task. Commit early with Conventional Commits that cite the task id.
 - Run `devbox verify` and show the output before saying something works.
 - Log progress in the feature's `progress.md` before ending a session.
+- Before any `gh pr create|edit|comment` or `gh issue create|edit|comment`, write the title and body to a
+  temporary file, run `node scripts/publish-scan.mjs --text <file>`, and post with `--body-file` only on
+  exit 0.
+- Evidence pasted into PR bodies and `progress.md` is summary lines only (pass and fail counts, gate
+  names, the `publish-scan:` summary line), never raw tool output with paths.
 
 Ask first:
 - Adding a dependency, a new service, or a new top-level directory.
 - Changing a public API, a database schema, CI, or anything in `.devbox/`.
 - Anything that touches auth, payments, personal data, or production infrastructure.
 - Deviating from the approved spec or design (update the doc and get approval, do not drift).
+- Changes to `scripts/publish-scan*`, `scripts/install-hooks.mjs` and `.githooks/` (the hook and CI run
+  the scanner of the branch being pushed, so a change there can weaken its own check).
 
 Never:
 - Commit secrets, credentials or `.env` files. Never print them in logs.
@@ -83,7 +97,12 @@ house style rather than describing it.
 
 ## Testing
 
-- Unit and integration tests live: TODO(devbox)
+- Tests live under `test/` and run with vitest:
+  - `test/unit/`: one module at a time through its public interface; no browser, no ffmpeg.
+  - `test/integration/`: real Chrome and ffmpeg; every video folder under `os.tmpdir()`, never inside
+    the repository.
+  - `test/golden/`: the real CLI spawned as `node bin/motion-slides.js`; the expected output sits in
+    `.txt` files next to the test, written by hand and reviewed like code.
 - Mock only at system boundaries (network, clock, randomness, third-party APIs). Never mock our own modules.
 - A bug fix starts with a test that reproduces the bug.
 
@@ -105,4 +124,4 @@ house style rather than describing it.
 One line each, newest last. Add a line whenever an agent or a human gets bitten by something
 this file could have prevented.
 
--
+- Examples in docs and tests (matching rules, fixtures) use made-up stand-ins, never an entry from the private terms list.

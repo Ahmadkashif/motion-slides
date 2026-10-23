@@ -28,3 +28,37 @@ Evidence: specs only, no code. Every issue requirement is mapped to an AC in doc
 Decisions: 8 open choices logged as "Proposed" in the Decisions log, pending grill. Not committed;
 the user reviews with git diff and commits.
 Next: /devbox:grill (confirm or override the proposed decisions in the Decisions log).
+
+## 2026-10-23 21:30  critique  design and tasks (Stage 0 and Stage 1)
+
+Did: devbox:linus reviewed the 001 design and tasks and the 008 publish-scan design (Slice 1) in four passes.
+Passes 1 to 3 returned THROW AWAY; every finding was fixed in the docs. Pass 4 returned GO with one fail-closed
+MAJOR (the bundled font tripping a short-term rule) and minors, all folded in before approval.
+Evidence: verdicts held in the session; key fixes are in design.md (no build step, header CSP, exact-match file
+map, FontFace weight range, immediateRender false, BT.709 tags, frame count, run folder; scan fails closed,
+user-owned baseline and allowed binaries, hook in the git common dir, pushed ids scanned, --text mode).
+Decisions: two 001 spec amendments (lead and gap at least 0.12 s; previews under out/preview/) decided under the
+build plan's delegation, flagged for the user at the PR. 008 approval covers Slice 1 (publish scan) only;
+the release slice is designed in Stage 8.
+Next: build 001 T001, then 008 T001, then the Stage 0 gate (001 T013).
+
+## 2026-10-23 22:34  build  T001
+
+Did: walking skeleton. package.json with the exact pins and no build script, both tsc projects, Biome, vitest,
+`.nvmrc`, `.gitignore`, the `motion-slides` bin (`--help`, `--version`, exit 0 and 2), CI on master with Ubuntu
+24.04, Node from `.nvmrc`, apt ffmpeg and strace and the headless shell; Dependabot ignores playwright-core;
+AGENTS.md Commands and Testing filled in.
+Evidence: `.devbox/bin/devbox verify`: FORMAT pass, LINT pass, TYPECHECK pass, TEST pass (1 file, 6 tests),
+BUILD pass (no build script, skipped by `--if-present`). Golden tests in `test/golden/cli.test.ts`: `--help`,
+`--version`, unknown option (exit 2), unknown command (exit 2), no command (help on stderr, exit 2), stdout
+closed early (exit 0, empty stderr). Each gate was also shown to fail on a planted fault (an unformatted file, a
+`==` comparison, unsorted imports, a type error in `main.ts`, a bad import in the bin, a wrong gsap type in a
+stage file), and the faults were removed. After `npm ci && npm test` no file changed; `git check-ignore
+node_modules/ build/ out/ | wc -l` prints 3. CI green is checked at ship.
+Decisions: no arguments prints help on stderr and exits 2. A stray word is reported as an unknown command
+(commander says "too many arguments" while there are no subcommands). EPIPE on stdout is ignored, so
+`--help | head -1` exits 0 without a stack trace. The lint gate is `biome check --formatter-enabled=false
+--error-on-warnings` (rules plus import order; warnings fail, per P7). Biome uses spaces, single quotes and
+100 columns. `tsconfig.json` also checks `bin/*.js`; `tsconfig.stage.json` takes `src/stage/types/gsap.d.ts`
+as its first input. Both projects use `skipLibCheck`. CI caches npm through setup-node.
+Next: 008 T001 (publish scan), then the Stage 0 gate (001 T013).

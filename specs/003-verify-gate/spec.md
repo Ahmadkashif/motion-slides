@@ -1,9 +1,9 @@
 ---
 feature: 003-verify-gate
 title: "Verify gate"
-status: draft   # draft | approved | shipped
+status: approved   # draft | approved | shipped
 lane: feature   # patch | feature | product
-appetite: 1 week   # proposed; the user sets the final appetite in grill
+appetite: 1 week   # accepted by the user on 2026-10-23
 created: 2026-10-23
 ---
 
@@ -250,20 +250,18 @@ Out of scope (explicit non-goals, so nobody builds them):
 
 ## Decisions log
 
-- Q: Loudness tolerance? -> Proposed: within 0.5 LU of -16 LUFS. Pending /devbox:grill.
-- Q: Where is silence measured, given the pad means the mix is never silent? -> Proposed: on the
-  narration stem at -50 dBFS, with a check that the stem matches the mixed audio length. Pending
-  /devbox:grill.
-- Q: Caption sync tolerance? -> Proposed: fail if a cue starts after the speech onset or more than
-  0.10 s before it; report the median lead. Pending /devbox:grill.
-- Q: How is "narration present" decided? -> Proposed: mean volume at least -35 dBFS overall and every
-  beat at least 10 dB above the pad-only level. Pending /devbox:grill.
-- Q: What counts as an arithmetic failure? -> Proposed: formula mismatch at displayed precision, an
+- Q: Loudness tolerance? -> A: within 0.5 LU of -16 LUFS. (Accepted by the user on 2026-10-23 with the build plan.)
+- Q: Where is silence measured, given the pad means the mix is never silent? -> A: on the
+  narration stem at -50 dBFS, with a check that the stem matches the mixed audio length. (Accepted by the user on 2026-10-23 with the build plan.)
+- Q: Caption sync tolerance? -> A: fail if a cue starts after the speech onset or more than
+  0.10 s before it; report the median lead. (Accepted by the user on 2026-10-23 with the build plan.)
+- Q: How is "narration present" decided? -> A: mean volume at least -35 dBFS overall and every
+  beat at least 10 dB above the pad-only level. (Accepted by the user on 2026-10-23 with the build plan.)
+- Q: What counts as an arithmetic failure? -> A: formula mismatch at displayed precision, an
   on-screen figure that differs from its table value, or an unsourced currency or percentage in a
-  caption. Pending /devbox:grill.
-- Q: What if more than 19 frames are required? -> Proposed: keep all required moments over several
-  numbered sheets. Pending /devbox:grill.
-- Q: Do manual checks fail the gate? -> Proposed: no; they are listed as NOT VERIFIED until a human
-  records a verdict, so the gate stays automatable. Pending /devbox:grill.
-- Q: Private banned terms in reports? -> Proposed: never printed; reported by list position only.
-  Pending /devbox:grill.
+  caption. (Accepted by the user on 2026-10-23 with the build plan.)
+- Q: What if more than 19 frames are required? -> A: keep all required moments over several
+  numbered sheets. (Accepted by the user on 2026-10-23 with the build plan.)
+- Q: Do manual checks fail the gate? -> A: no; they are listed as NOT VERIFIED until a human
+  records a verdict, so the gate stays automatable. (Accepted by the user on 2026-10-23 with the build plan.)
+- Q: Private banned terms in reports? -> A: never printed; reported by list position only. (Accepted by the user on 2026-10-23 with the build plan.)

@@ -1,9 +1,9 @@
 ---
 feature: 008-acceptance-and-public-release
 title: "Acceptance and public release"
-status: draft   # draft | approved | shipped
+status: approved   # draft | approved | shipped
 lane: feature   # patch | feature | product
-appetite: 1 week   # proposed; the user sets the final appetite in grill
+appetite: 1 week   # accepted by the user on 2026-10-23
 created: 2026-10-23
 ---
 
@@ -44,18 +44,19 @@ verified commit, and issue #17 gets a closing comment once the user approves it.
 
 ## User stories
 
-### US1 (P1): Reproduce R1, R2 and R3 locally
+### US1 (P3, optional): Reproduce R1, R2 and R3 locally if their briefs are supplied
 
 As the user, I want the three reference videos rebuilt from their briefs and passing the gate, so that
 the product is proven on real work.
 
-[NEEDS CLARIFICATION: The briefs for R1, R2 and R3 are not on this machine, and the user says there is no source on the Mac to transfer. Will the three briefs be supplied (and from where), or does reproducing R1 to R3 leave acceptance, so that done criterion 8 rests on the made-up sample alone?]
+Not part of acceptance (decided by the user on 2026-10-23): the briefs are not on this machine, so done
+criterion 8 rests on the made-up sample (US2). The criteria below apply only WHERE a brief is supplied
+later, and run locally only.
 
-- AC1.1 Given the R1 brief (8 scenes, about 112 s), when it goes through `new --through`, then the gate
+- AC1.1 Given the R1 brief, when it goes through `new --through`, then the gate
   passes every automated check.
-- AC1.2 Given the R2 brief (10 scenes, 176.9 s, with a running dollar counter and a static calculator
-  panel), when it goes through `new --through`, then the gate passes every automated check.
-- AC1.3 Given the R3 brief (103 s, with a before/after calculator), when it goes through `new --through`,
+- AC1.2 Given the R2 brief, when it goes through `new --through`, then the gate passes every automated check.
+- AC1.3 Given the R3 brief, when it goes through `new --through`,
   then the gate passes every automated check.
 - AC1.4 THE SYSTEM SHALL reproduce each video with zero changes to product code and zero hand edits to
   the generated idea or scene page, and record each reproduction's duration next to the original's.
@@ -154,7 +155,7 @@ from a private repository becomes public.
 
 ## Edge cases and failure modes
 
-- The reference briefs never arrive: see the clarification above; acceptance then rests on the sample
+- The reference briefs never arrive: acceptance rests on the sample (US1 is optional, decided 2026-10-23)
   and the README says so.
 - The user does not approve the weights download before release: the release ships with the preview as
   interim evidence and narration-related items NOT RUN (AC2.4).
@@ -186,7 +187,7 @@ from a private repository becomes public.
 ## Scope
 
 In scope:
-- Local reproduction of R1 to R3 (subject to the clarification), the made-up sample end to end, the
+- Local reproduction of R1 to R3 (optional, only if their briefs are supplied), the made-up sample end to end, the
   README, evidence, licence and notices, the pre-push scans, the release proposal, `findings.md` and the
   draft closing comment.
 
@@ -214,7 +215,9 @@ Out of scope (explicit non-goals, so nobody builds them):
   not only at release.
 - Q: Product and repository name? -> A: `motion-slides`, Ahmadkashif/motion-slides (user's naming).
 - Q: How are the reference videos named in public? -> A: R1, R2, R3 only (user's privacy rule).
-- Q: Where does a large sample MP4 go? -> Proposed: committed if at most 25 MB, otherwise a
-  user-approved release asset. Pending /devbox:grill.
-- Q: What if the weights are never approved? -> Proposed: ship with the preview as interim evidence and
-  narration items NOT RUN, with commands (registry commitment). Pending /devbox:grill.
+- Q: Are the R1 to R3 briefs supplied? -> A: No; they are not on this machine. Reproducing R1 to R3 is
+  optional (US1, P3) and acceptance rests on the made-up sample (decided by the user on 2026-10-23).
+- Q: Where does a large sample MP4 go? -> A: committed if at most 25 MB, otherwise a
+  user-approved release asset. (Accepted by the user on 2026-10-23 with the build plan.)
+- Q: What if the weights are never approved? -> A: ship with the preview as interim evidence and
+  narration items NOT RUN, with commands (registry commitment). (Accepted by the user on 2026-10-23 with the build plan.)

@@ -11,6 +11,9 @@ updates:
     directory: "/"
     schedule:
       interval: "weekly"
+    ignore:
+      # Bumped by hand together with the Chrome headless shell revision it downloads.
+      - dependency-name: "playwright-core"
     groups:
       minor-and-patch:
         update-types: ["minor", "patch"]

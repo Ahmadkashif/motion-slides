@@ -1,6 +1,6 @@
 ---
 feature: 008-acceptance-and-public-release
-status: draft   # draft | approved   (approved = the critique gate returned GO)
+status: approved   # draft | approved   (approved = the critique gate returned GO)
 created: 2026-10-23
 ---
 
@@ -31,18 +31,11 @@ Rules:
 - The last task before shipping is usually HITL: a human reviews docs, release notes and rollout.
 -->
 
-## Slice 1: walking skeleton
+## Slice 1: publish-safety scan from the first commit (build-plan Stage 0)
 
-<!-- tasks go here -->
+- [x] T001 [AFK] Publish-safety scan over the working tree and every object in history (secrets, private terms, host identity, opaque binaries), labels instead of values, keyed fingerprints, fail closed, in-history stop-and-ask with a user-owned baseline and user-owned allowed binaries, pushed commit ids scanned, `--text` mode and the AGENTS.md rule for text posted to GitHub, hook installed executable in the git common dir by `prepare` and checked byte for byte, CI secrets-only mode before `npm ci` on a full clone (US4: AC4.1, AC4.2, AC4.3, AC4.4, AC4.5) after: 001 T001
+      Verify: `npm test -- test/integration/publish-scan` passes every case in design.md, with planted values built at run time and absent from all output; after `npm ci`, `<git common dir>/hooks/pre-push` exists, `test -x` passes on it, and no `core.hooksPath` is set; `node scripts/publish-scan.mjs` exits 0 on this repository's full history with the real private list (only the summary line goes in progress.md); CI runs `node scripts/publish-scan.mjs --ci` before `npm ci` with `fetch-depth: 0`; AGENTS.md carries the `--text` rule, the summary-only evidence rule, and lists changes to `scripts/publish-scan*`, `scripts/install-hooks.mjs` and `.githooks/` as ask-first
 
-## Slice 2: <story or capability>
+## Slice 2: release (build-plan Stage 8, after the PoC)
 
-<!-- tasks go here -->
-
-## Hardening
-
-<!-- edge cases and failure modes from spec.md, NFR checks -->
-
-## Ship
-
-<!-- docs, CHANGELOG, rollout and rollback plan; usually one HITL task -->
+<!-- README, LICENSE, notices, sample evidence, release proposal, findings, closing comment: sliced in Stage 8 -->

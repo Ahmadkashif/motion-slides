@@ -1,9 +1,9 @@
 ---
 feature: 004-scene-component-library-and-brand-theming
 title: "Scene component library and brand theming"
-status: draft   # draft | approved | shipped
+status: approved   # draft | approved | shipped
 lane: feature   # patch | feature | product
-appetite: 1 week   # proposed; the user sets the final appetite in grill
+appetite: 1 week   # accepted by the user on 2026-10-23
 created: 2026-10-23
 ---
 
@@ -274,14 +274,12 @@ Out of scope (explicit non-goals, so nobody builds them):
 - Q: Which components? -> A: running counter, calculator or price panel (static and before/after),
   flying chip, gender-neutral figure, funnel, flow or sequence diagram, cards, title card, close card,
   disclaimer, captions (done criterion 2).
-- Q: How is "beside" and "above" made testable for chips? -> Proposed: no box intersection, within 24 px
-  of the source at the start, entirely above the digits at landing. Pending /devbox:grill.
-- Q: When is a scene dense? -> Proposed: marked by the idea, or automatically at 4 or more lanes or more
-  than 12 items; dense scenes get a 0.40 s gap and at least 0.5 s hold per staged reveal. Pending
-  /devbox:grill.
-- Q: Should low-contrast brand colours be rejected? -> Proposed: yes for captions and body text (WCAG 2.2
-  AA), naming the pair. Pending /devbox:grill.
-- Q: Where is the disclosure shown? -> Proposed: on the close card for at least 3 s, plus the MP4
-  metadata (001) and the .vtt NOTE (002). Pending /devbox:grill.
-- Q: Component limits (rows, nodes, lanes, cards)? -> Proposed: as in AC5.4, AC8.1 to AC8.3 and AC9.1.
-  Pending /devbox:grill.
+- Q: How is "beside" and "above" made testable for chips? -> A: no box intersection, within 24 px
+  of the source at the start, entirely above the digits at landing. (Accepted by the user on 2026-10-23 with the build plan.)
+- Q: When is a scene dense? -> A: marked by the idea, or automatically at 4 or more lanes or more
+  than 12 items; dense scenes get a 0.40 s gap and at least 0.5 s hold per staged reveal. (Accepted by the user on 2026-10-23 with the build plan.)
+- Q: Should low-contrast brand colours be rejected? -> A: yes for captions and body text (WCAG 2.2
+  AA), naming the pair. (Accepted by the user on 2026-10-23 with the build plan.)
+- Q: Where is the disclosure shown? -> A: on the close card for at least 3 s, plus the MP4
+  metadata (001) and the .vtt NOTE (002). (Accepted by the user on 2026-10-23 with the build plan.)
+- Q: Component limits (rows, nodes, lanes, cards)? -> A: as in AC5.4, AC8.1 to AC8.3 and AC9.1. (Accepted by the user on 2026-10-23 with the build plan.)
