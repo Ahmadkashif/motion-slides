@@ -796,6 +796,25 @@ describe('publish-scan pre-push hook on a real push', () => {
     expectNoLeak(blocked, LONG);
   });
 
+  it('blocks a push whose planted commit is hidden behind a git replace object', () => {
+    const box = makeBox();
+    makeRepo(box);
+    const remote = makeRemote(box);
+    git(box, 'commit', '-q', '--allow-empty', '-m', `Plan for ${LONG}`);
+    const planted = git(box, 'rev-parse', 'HEAD');
+    const stand = git(box, 'commit-tree', `${planted}^{tree}`, '-p', `${planted}^`, '-m', 'plan');
+    git(box, 'replace', planted, stand);
+    // With the replacement in place, git shows the clean stand-in wherever it reads the commit.
+    expect(git(box, 'log', '-1', '--format=%s')).toBe('plan');
+    const blocked = run('git', ['push', '-q', 'origin', 'main'], box.repo, box.env);
+    expect(blocked.code).not.toBe(0);
+    expect(`${blocked.stdout}${blocked.stderr}`).toContain(
+      `private-term <private term #1> in commit ${planted} message`,
+    );
+    expect(remoteRef(box, remote, 'main')).toBe('');
+    expectNoLeak(blocked, LONG);
+  });
+
   it('refuses a --push-ref value that is not a ref name (exit 2)', () => {
     const box = makeBox();
     makeRepo(box);

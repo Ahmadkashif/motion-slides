@@ -912,6 +912,18 @@ function splitLines(output) {
 }
 
 /**
+ * The environment for every git process of the scan. Replacement objects (`git replace`) would make git
+ * show a stand-in wherever it reads the replaced object, while a push still sends the original, so they
+ * are turned off. The replacements themselves stay in scope: their refs/replace/* refs are scanned like
+ * any other ref.
+ * @param {NodeJS.ProcessEnv} env
+ * @returns {NodeJS.ProcessEnv}
+ */
+function gitEnv(env) {
+  return { ...env, GIT_NO_REPLACE_OBJECTS: '1' };
+}
+
+/**
  * Runs git and resolves with its standard output. Any failure is "cannot scan".
  * @param {string} cwd
  * @param {NodeJS.ProcessEnv} env
@@ -920,7 +932,7 @@ function splitLines(output) {
  */
 function git(cwd, env, args) {
   return new Promise((resolve, reject) => {
-    const child = spawn('git', args, { cwd, env, stdio: ['ignore', 'pipe', 'pipe'] });
+    const child = spawn('git', args, { cwd, env: gitEnv(env), stdio: ['ignore', 'pipe', 'pipe'] });
     /** @type {Buffer[]} */
     const out = [];
     /** @type {Buffer[]} */
@@ -949,7 +961,7 @@ function readObjects(cwd, env, oids, onObject) {
   return new Promise((resolve, reject) => {
     const child = spawn('git', ['cat-file', '--batch'], {
       cwd,
-      env,
+      env: gitEnv(env),
       stdio: ['pipe', 'pipe', 'pipe'],
     });
     /** @type {Buffer[]} */

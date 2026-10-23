@@ -81,6 +81,10 @@ flowchart LR
     deduplicated by object id. The hook passes the local object ids git hands it on standard input as
     `--include <id>` arguments, so a commit no branch reaches (`git push origin <id>:refs/heads/x`) is
     still scanned.
+    - Every git command of the scan runs with `GIT_NO_REPLACE_OBJECTS=1`. A replacement object
+      (`git replace`) makes git show a stand-in wherever it reads the replaced object, while a push still
+      sends the original. The replacements stay in scope: their `refs/replace/*` refs are refs like any
+      other.
     - Blobs are scanned as bytes decoded as latin1, so binary files are covered too. A blob with a
       UTF-16 byte-order mark, or with NUL in every other byte of its first 1 KB, is also decoded as
       UTF-16.
